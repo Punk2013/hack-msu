@@ -50,9 +50,13 @@ def gateway(settings):
 
 def trial(case, text, mode, project, output, ui_url):
     ctx = Context(project, mode)
+    allowed_remaining = set(case.get("expected_unmasked", []))
+    if not allowed_remaining.issubset(case["sensitive"]):
+        raise ValueError("expected_unmasked must name explicitly annotated sensitive values")
     row = {"file": case["file"], "mode": mode, "original": text,
            "known_limits": case.get("known_limits", False), "error": None,
-           "annotated_fields": len(case["sensitive"])}
+           "annotated_fields": len(case["sensitive"]),
+           "expected_unmasked": sorted(allowed_remaining)}
     started = time.perf_counter()
     try:
         spans = detect(text, ctx)
@@ -66,6 +70,8 @@ def trial(case, text, mode, project, output, ui_url):
         row["error"] = str(exc)
     row["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
     row["remaining_values"] = [v for v in case["sensitive"] if v in row.get("masked", "")]
+    row["unexpected_remaining_values"] = [
+        v for v in row["remaining_values"] if v not in allowed_remaining]
     seen = {}
 
     def echo(body):
@@ -92,16 +98,39 @@ def trial(case, text, mode, project, output, ui_url):
         row["http_restored_exact"] = response.status_code == 200 and (
             response.json()["choices"][0]["message"]["content"] == text)
     if ui_url:
-        with httpx.Client(base_url=ui_url, trust_env=False, timeout=30) as client:
-            ui_ctx = {"project_id": project + "-ui", "mode": mode}
-            response = client.post("/api/process", json={**ui_ctx, "text": text})
-            row["ui_process_status"] = response.status_code
-            if response.status_code == 200:
-                row["ui_masked"] = response.json()["masked_text"]
-                response = client.post("/api/restore", json={**ui_ctx, "text": row["ui_masked"]})
-                row["ui_restore_status"] = response.status_code
-                row["ui_restored_exact"] = response.status_code == 200 and (
-                    response.json()["restored_text"] == text)
+        row["ui_checks_passed"] = False
+        try:
+            with httpx.Client(base_url=ui_url, trust_env=False, timeout=30) as client:
+                ui_ctx = {"project_id": project + "-ui", "mode": mode}
+                response = client.post("/api/process", json={**ui_ctx, "text": text})
+                row["ui_process_status"] = response.status_code
+                if response.status_code == 200:
+                    data = response.json()
+                    if not isinstance(data, dict) or not isinstance(data.get("masked_text"), str):
+                        raise ValueError("invalid UI process response")
+                    row["ui_masked"] = data["masked_text"]
+                    row["ui_remaining_values"] = [
+                        v for v in case["sensitive"] if v in row["ui_masked"]]
+                    row["ui_unexpected_remaining_values"] = [
+                        v for v in row["ui_remaining_values"] if v not in allowed_remaining]
+                    response = client.post(
+                        "/api/restore", json={**ui_ctx, "text": row["ui_masked"]})
+                    row["ui_restore_status"] = response.status_code
+                    if response.status_code == 200:
+                        data = response.json()
+                        if not isinstance(data, dict):
+                            raise ValueError("invalid UI restore response")
+                        row["ui_restored_exact"] = data.get("restored_text") == text
+                        row["ui_restore_complete"] = data.get("status") == "complete"
+                if case.get("expect_refusal"):
+                    row["ui_checks_passed"] = row["ui_process_status"] == 500
+                else:
+                    row["ui_checks_passed"] = bool(
+                        row["ui_process_status"] == 200
+                        and row.get("ui_unexpected_remaining_values") == []
+                        and row.get("ui_restored_exact") and row.get("ui_restore_complete"))
+        except (httpx.HTTPError, ValueError) as exc:
+            row["ui_error"] = type(exc).__name__
     if case.get("expect_refusal"):
         row["passed"] = bool(row["error"]) and row["http_status"] == 500 and (
             row["upstream"]["requests"] == 0)
@@ -109,9 +138,10 @@ def trial(case, text, mode, project, output, ui_url):
         row["passed"] = not row["error"] and row.get("exact") and row.get("stable") and (
             row.get("restore_status") == "complete" and row["wire_matches_masked"] and
             row["http_restored_exact"] and row["upstream"]["requests"] == 1) and (
-            not row["remaining_values"] or row["known_limits"])
-        if ui_url:
-            row["passed"] = row["passed"] and row.get("ui_restored_exact", False)
+            not row["unexpected_remaining_values"])
+    if ui_url:
+        # UI must satisfy the same scenario even when the gateway correctly refused it.
+        row["passed"] = bool(row["passed"] and row["ui_checks_passed"])
     return row
 
 
@@ -139,6 +169,9 @@ def save_report(output, rows, metadata):
                                               ("Восстановление", "restored")))
         blocks.append(f"<article><h2>{html.escape(row['file'])} · {row['mode']}</h2>"
                       + f"<p><strong>{html.escape(verdict)}</strong></p>"
+                      + ("<p><strong>UI API: " + (
+                          "ожидание выполнено" if row["ui_checks_passed"] else "ПРОВАЛ")
+                         + "</strong></p>" if "ui_checks_passed" in row else "")
                       + f"<div class='texts'>{sections}</div>"
                       + "<details><summary>Что принял HTTP upstream</summary><pre>"
                       + html.escape(row.get("upstream_text") or "—") + "</pre></details>"
@@ -160,11 +193,12 @@ def save_report(output, rows, metadata):
     header = ("# Локальные тексты: фактический прогон\n\n"
               "Только синтетика; HTTP upstream — локальный echo, не LLM.\n\n"
               "| Текст | Режим | Roundtrip | Повтор стабилен | "
-              "Исходных значений осталось | HTTP |\n"
-              "| --- | --- | --- | --- | ---: | ---: |\n")
+              "Исходных значений осталось | HTTP | UI | Ожидание выполнено |\n"
+              "| --- | --- | --- | --- | ---: | ---: | --- | --- |\n")
     table = "".join(f"| {r['file']} | {r['mode']} | {r.get('exact', 'отказ')} | "
                     f"{r.get('stable', '—')} | {len(r['remaining_values'])} | "
-                    f"{r['http_status']} |\n" for r in rows)
+                    f"{r['http_status']} | {r.get('ui_checks_passed', '—')} | "
+                    f"{r['passed']} |\n" for r in rows)
     (output / "summary.md").write_text(header + table)
 
 
