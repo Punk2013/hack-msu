@@ -32,6 +32,7 @@ REQUEST_FIELDS = {
     "frequency_penalty",
     "seed",
     "parallel_tool_calls",
+    "store",  # pi sends store=false: asks the provider not to keep the request
 }
 BLOCKED_NOTE = "\n[pii-gateway] вызов `{name}` заблокирован политикой: {reason}."
 
@@ -184,7 +185,7 @@ def mask_request(body: dict[str, Any], t: Transformer) -> dict[str, Any]:
             ):
                 raise UnsupportedRequest("invalid numeric parameter")
             out[key] = _mask_json(value, t)
-    for key in ("stream", "parallel_tool_calls"):
+    for key in ("stream", "parallel_tool_calls", "store"):
         if key in body:
             if type(body[key]) is not bool:
                 raise UnsupportedRequest("invalid boolean parameter")
