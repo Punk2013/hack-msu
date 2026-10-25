@@ -143,7 +143,7 @@ def _tools(value: Any, t: Transformer, *, definition: bool) -> list[dict[str, An
         raise UnsupportedRequest("tools must be a list")
     out = []
     for item in value:
-        fields = {"type", "function"} if definition else {"id", "type", "function"}
+        fields = {"type", "function"} if definition else {"id", "type", "function", "index"}
         tool = _object(item, fields)
         if tool.get("type") != "function":
             raise UnsupportedRequest("only function tools are supported")
@@ -152,6 +152,10 @@ def _tools(value: Any, t: Transformer, *, definition: bool) -> list[dict[str, An
             "function": _function(tool.get("function"), t, definition=definition),
         }
         if not definition:
+            # Ollama includes this stream-only field in ordinary response history.
+            # Validate and drop it; never copy arbitrary extension values upstream.
+            if "index" in tool and (type(tool["index"]) is not int or tool["index"] < 0):
+                raise UnsupportedRequest("tool call index must be a non-negative integer")
             result["id"] = _control(tool.get("id"), t)
         out.append(result)
     return out
@@ -218,7 +222,12 @@ def mask_request(body: dict[str, Any], t: Transformer) -> dict[str, Any]:
         raise UnsupportedRequest("messages must be a list")
     out["messages"] = []
     for msg in messages:
-        msg = _object(msg, {"role", "content", "name", "refusal", "tool_calls", "tool_call_id"})
+        msg = _object(
+            msg,
+            {"role", "content", "name", "refusal", "tool_calls", "tool_call_id", "function_call"},
+        )
+        if msg.get("function_call") is not None:
+            raise UnsupportedRequest("legacy function calls are not supported")
         role = msg.get("role")
         if not isinstance(role, str) or role not in ROLES:
             raise UnsupportedRequest("unsupported message role")

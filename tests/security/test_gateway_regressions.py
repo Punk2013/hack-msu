@@ -302,3 +302,51 @@ def test_stream_buffer_limit_releases_no_pending_calls(tmp_path):
     with pytest.raises(PiiGatewayError, match="buffer limit"):
         restorer.feed(chunk({"content": "x" * (MAX_BUFFER_CHARS + 1)}))
     assert restorer.finish() == []
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_ollama_second_turn_history_is_accepted(tmp_path, stream):
+    sent = []
+
+    def upstream(request):
+        sent.append(json.loads(request.content))
+        if stream:
+            return httpx.Response(200, text="data: [DONE]\n\n")
+        return httpx.Response(200, json={"choices": []})
+
+    history_call = tool_delta()["tool_calls"][0]
+    body = {
+        "model": "m",
+        "stream": stream,
+        "messages": [
+            {"role": "user", "content": "write file"},
+            {
+                "role": "assistant",
+                "content": "",
+                "function_call": None,
+                "tool_calls": [history_call],
+            },
+            {"role": "tool", "tool_call_id": "a", "content": REAL},
+        ],
+    }
+    with TestClient(
+        create_app(Settings(workspace=tmp_path), T(), httpx.MockTransport(upstream))
+    ) as c:
+        assert c.post("/v1/chat/completions", json=body).status_code == 200
+    assert len(sent) == 1
+    assistant = sent[0]["messages"][1]
+    assert "function_call" not in assistant
+    assert "index" not in assistant["tool_calls"][0]
+    assert assistant["tool_calls"][0]["id"] == "a"
+    assert assistant["content"] == ""
+    assert sent[0]["messages"][2]["content"] == "[EMAIL_1]"
+    assert history_call["index"] == 0
+
+
+@pytest.mark.parametrize("index", [True, -1, "0", REAL, None, {}])
+def test_invalid_history_tool_index_is_refused(index):
+    from pii_gateway.gateway.adapter import UnsupportedRequest, mask_request
+
+    call = {**tool_delta()["tool_calls"][0], "index": index}
+    with pytest.raises(UnsupportedRequest):
+        mask_request({"model": "m", "messages": [{"role": "assistant", "tool_calls": [call]}]}, T())

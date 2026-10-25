@@ -32,6 +32,9 @@ max_tokens/max_completion_tokens, n=1, stop, presence_penalty/frequency_penalty,
 seed, parallel_tool_calls. Дополнительные поля (включая user, metadata,
 response_format, legacy function_call и мультимодальность) дают HTTP 400.
 Новые поля требуют отдельного адаптера и регрессионной проверки.
+В истории Ollama целочисленный неотрицательный tool_calls[].index принимается
+и удаляется. Пустой content сохраняется; legacy function_call: null удаляется,
+непустой legacy вызов по-прежнему отвергается.
 
 Строки текста и аргументов маскируются. Ключи и управляющие строки, содержащие
 обнаруженные ПДн, отвергаются: изменение имени инструмента или ключа JSON
