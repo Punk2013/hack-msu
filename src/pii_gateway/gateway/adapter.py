@@ -185,11 +185,15 @@ def mask_request(body: dict[str, Any], t: Transformer) -> dict[str, Any]:
             ):
                 raise UnsupportedRequest("invalid numeric parameter")
             out[key] = _mask_json(value, t)
-    for key in ("stream", "parallel_tool_calls", "store"):
+    for key in ("stream", "parallel_tool_calls"):
         if key in body:
             if type(body[key]) is not bool:
                 raise UnsupportedRequest("invalid boolean parameter")
             out[key] = body[key]
+    if "store" in body:  # pi and others send it; the provider must never keep the dialogue
+        if type(body["store"]) is not bool:
+            raise UnsupportedRequest("invalid boolean parameter")
+        out["store"] = False
     if "stream_options" in body:
         options = _object(body["stream_options"], {"include_usage"})
         if any(type(v) is not bool for v in options.values()):

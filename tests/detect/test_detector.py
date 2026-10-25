@@ -193,3 +193,15 @@ def test_corpus_annotations_and_live_output_contract(filename):
         expected = [EntitySpan(**s, detector="annotation") for s in row["expected"]]
         check_spans(row["text"], expected)
         check_spans(row["text"], detect(row["text"], CTX))
+
+
+def test_capitalized_verb_is_not_a_person():
+    # pi sends AGENTS.md in its system prompt: "Упоминай адресата через @login."
+    from pii_gateway.core.types import Context
+    from pii_gateway.detect import detect
+
+    ctx = Context("verb")
+    text = "Обсуждения — в комментариях. Упоминай адресата. Иван Петров придёт, Смит тоже."
+    found = [s.raw_text for s in detect(text, ctx)]
+    assert "Упоминай" not in found
+    assert "Иван Петров" in found

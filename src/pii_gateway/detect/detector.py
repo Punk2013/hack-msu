@@ -79,8 +79,30 @@ def _person_spans(text: str) -> list[EntitySpan]:
         return [
             EntitySpan(s.start, s.stop, PiiType.PERSON, text[s.start : s.stop], "natasha@1.6.0")
             for s in doc.spans
-            if s.type == "PER"
+            if s.type == "PER" and not _never_a_name(text[s.start : s.stop])
         ]
+
+
+def _never_a_name(raw: str) -> bool:
+    """A single dictionary word that is only a verb form cannot be a person's name.
+
+    NER marks a capitalized imperative at a sentence start ("Упоминай адресата") as PER.
+    """
+    if len(raw.split()) != 1:
+        return False
+    from pymorphy3 import MorphAnalyzer
+
+    global _morph
+    if _morph is None:
+        _morph = MorphAnalyzer()
+    parses = _morph.parse(raw.strip())
+    # only dictionary words whose every reading is a verb form; unknown words such as
+    # rare or foreign surnames ("Нгуен") are kept, missing a name is worse than a marker
+    verb_forms = {"VERB", "INFN", "GRND", "PRTS", "PRTF"}
+    return all(p.is_known and p.tag.POS in verb_forms for p in parses)
+
+
+_morph = None
 
 
 def _resolve(text: str, candidates: list[EntitySpan]) -> list[EntitySpan]:

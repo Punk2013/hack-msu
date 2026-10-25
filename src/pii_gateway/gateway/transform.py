@@ -6,11 +6,14 @@ mask()/restore() in, tests and Gate 0 use simpler implementations.
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 from pii_gateway.core.types import (
     Context,
+    EntitySpan,
     PiiGatewayError,
+    PiiType,
     RestoreResult,
     RestoreStatus,
     check_spans,
@@ -46,6 +49,7 @@ class CorePipeline:
         try:
             spans = detect(text, self.ctx)
             check_spans(text, spans)
+            spans = _with_known_originals(text, spans, self.ctx)
             return mask(text, spans, self.ctx).text
         except PiiGatewayError:
             raise
@@ -61,3 +65,35 @@ class CorePipeline:
             raise
         except Exception as exc:
             raise PiiGatewayError(f"restore failed: {type(exc).__name__}") from exc
+
+
+def _with_known_originals(text: str, spans: list[EntitySpan], ctx: Context) -> list[EntitySpan]:
+    """Add every value the gateway itself restored earlier, whatever the detector says.
+
+    Restored data comes back in the agent's history on the next turn. Detector recall
+    on model-written text (odd word order, short forms) must not decide whether it
+    leaves the machine: anything in the project vault is masked again.
+    """
+    from pii_gateway.vault.storage import Vault
+
+    with Vault(ctx.project_id) as vault:
+        known = [(o, t) for o, t in vault.known_originals() if len(o) >= 3]
+    if not known:
+        return spans
+    kinds = dict(known)
+    alternation = "|".join(re.escape(o) for o in sorted(kinds, key=len, reverse=True))
+    result = list(spans)
+    for m in re.finditer(rf"(?<!\w)(?:{alternation})(?!\w)", text):
+        start, end = m.start(), m.end()
+        overlapping = [s for s in result if s.start < end and start < s.end]
+        if overlapping and all(s.start <= start and end <= s.end for s in overlapping):
+            continue  # already fully covered by a detected span
+        # a detector span that covers only part of a known value ("Иван Петрович" of
+        # "Иван Петрович Иванов") must not leave the rest open: cover the union
+        start = min([start, *(s.start for s in overlapping)])
+        end = max([end, *(s.end for s in overlapping)])
+        result = [s for s in result if s not in overlapping]
+        result.append(
+            EntitySpan(start, end, PiiType(kinds[m.group(0)]), text[start:end], "vault:known@1")
+        )
+    return sorted(result, key=lambda s: s.start)

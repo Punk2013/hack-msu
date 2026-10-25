@@ -18,6 +18,8 @@ from typing import Any
 
 import httpx
 
+NUDGE = "Ты ещё не записал ни одного файла в out/. Продолжай выполнять задачу инструментами."
+
 SYSTEM = (
     "Ты помощник, который работает с файлами в рабочей папке. "
     "Используй инструменты list_files, read_file и write_file. "
@@ -174,7 +176,8 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": task},
     ]
-    for _ in range(max_steps):
+    wrote, nudges = False, 0
+    for step in range(max_steps):
         payload = {"model": model, "messages": messages, "tools": TOOLS}
         if stream:
             message = _stream_message(client, payload)
@@ -191,6 +194,11 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
                 print(message["content"])
         messages.append(message)
         if not message.get("tool_calls"):
+            # small local models sometimes stop after reading; nudge them twice at most
+            if not wrote and nudges < 2 and step < max_steps - 1:
+                nudges += 1
+                messages.append({"role": "user", "content": NUDGE})
+                continue
             break
         for call in message["tool_calls"]:
             fn = call["function"]
@@ -199,6 +207,7 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
             except json.JSONDecodeError:
                 args = {}
             result = ws.run(fn["name"], args)
+            wrote = wrote or (fn["name"] == "write_file" and result.startswith("записано"))
             print(f"\n[tool] {fn['name']}({json.dumps(args, ensure_ascii=False)[:120]})")
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
     else:

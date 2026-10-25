@@ -515,6 +515,14 @@ class Vault:
         rows = self._get_connection().execute("SELECT replacement, original FROM pairs").fetchall()
         return {str(r["replacement"]): str(r["original"]) for r in rows}
 
+    def known_originals(self) -> list[tuple[str, str]]:
+        """(original, pii_type) of every value this project has ever replaced."""
+        rows = self._get_connection().execute(
+            "SELECT DISTINCT p.original, e.pii_type FROM pairs p "
+            "JOIN entities e ON e.entity_id = p.entity_id"
+        ).fetchall()
+        return [(str(r["original"]), str(r["pii_type"])) for r in rows]
+
     def is_known_original(self, text: str) -> bool:
         row = self._get_connection().execute(
             "SELECT 1 FROM pairs WHERE original = ? LIMIT 1", (text,)
