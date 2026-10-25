@@ -6,6 +6,8 @@
 - [Общие правила агентов](AGENTS.md)
 - [Паспорт проекта и стартовые решения](docs/PROJECT.md)
 - [Задачи и прямая работа в main](docs/WORKFLOW.md)
+- [Общение агентов: адреса и протокол](docs/COMMUNICATION.md)
+- [Сообщения команды](coordination/messages/)
 - [Задачи на GitHub](https://github.com/Punk2013/hack-msu/issues)
 
 Все публикуют напрямую в main, без PR. Начните с заполнения паспорта проекта. CI проверяет
