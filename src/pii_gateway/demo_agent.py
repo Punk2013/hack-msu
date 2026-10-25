@@ -201,6 +201,8 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
             result = ws.run(fn["name"], args)
             print(f"\n[tool] {fn['name']}({json.dumps(args, ensure_ascii=False)[:120]})")
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+    else:
+        raise RuntimeError("agent step limit reached before completion")
     return messages
 
 

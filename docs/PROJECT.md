@@ -90,7 +90,10 @@ PII_WORKSPACE=./demo PII_WRITE_ROOTS=./demo/out \
 scripts/demo.sh qwen2.5:7b
 ```
 
-Vault, дампы и `report.html` сохраняются в `demo/.run/<время>/`, результат агента — в `demo/out/`.
+Каждый запуск создаёт приватный временный каталог и копирует карточки в его `workspace/`.
+Vault, дампы и `report.html` лежат рядом с `workspace/`, вне доступа файловых tools.
+Пути отчёта и результата скрипт печатает после завершения. Это запуск без OS sandbox;
+проверка Linux-изоляции и границы MVP описаны в [MVP_ACCEPTANCE.md](MVP_ACCEPTANCE.md).
 CI запускает пробельную проверку, ruff и pytest.
 
 ## Контракты
