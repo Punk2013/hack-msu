@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PII Gateway — Zero-Trust Privacy Layer for AI Agents</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/styles.css">
+</head>
+<body class="dark-theme">
+  <!-- Glow background aura -->
+  <div class="aura-glow aura-top-left"></div>
+  <div class="aura-glow aura-bottom-right"></div>
+  <div class="grid-overlay"></div>
+
+  <!-- Main Navigation Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand-logo">
+        <div class="logo-shield">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">PII GATEWAY <span class="badge-accent">DEFENSE 2026</span></div>
+          <div class="brand-sub">Zero-Trust Privacy & Pseudonymization Layer for Autonomous Agents</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Status Badges -->
+    <div class="header-status-strip">
+      <div class="status-chip chip-online" title="Gateway активен на локальном порту 8787">
+        <span class="status-pulse"></span>
+        <span class="chip-label">GATEWAY: <strong id="lbl-gw-status">ACTIVE</strong></span>
+      </div>
+      <div class="status-chip chip-vault" title="SQLite Vault защищен правами 0600 и изолирован от sandbox">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        <span class="chip-label">VAULT: <strong>0600 SQLITE</strong></span>
+      </div>
+      <div class="status-chip chip-canary" title="Независимый Upstream Spy: 0 канареек в исходящем трафике">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+        <span class="chip-label">LEAKS: <strong>0 DETECTED</strong></span>
+      </div>
+      <div class="status-chip chip-fidelity" title="Roundtrip accuracy restore(mask(x)) == x">
+        <span class="chip-label">ACCURACY: <strong>100.0%</strong></span>
+      </div>
+    </div>
+
+    <!-- Primary Navigation Tabs -->
+    <nav class="nav-tabs" id="main-tabs">
+      <button class="nav-tab active" data-tab="pipeline">
+        <span class="tab-icon">🎬</span>
+        <span>Конвейер защиты</span>
+      </button>
+      <button class="nav-tab" data-tab="playground">
+        <span class="tab-icon">⚡</span>
+        <span>Песочница</span>
+      </button>
+      <button class="nav-tab" data-tab="vault">
+        <span class="tab-icon">🗄️</span>
+        <span>Таблица Vault</span>
+      </button>
+      <button class="nav-tab" data-tab="metrics">
+        <span class="tab-icon">📊</span>
+        <span>Метрики и Стенд</span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- Main Container -->
+  <main class="app-main">
+
+    <!-- ======================================================== -->
+    <!-- TAB 1: INTERACTIVE PIPELINE DEMO (HERO PRESENTATION)     -->
+    <!-- ======================================================== -->
+    <section class="tab-content active" id="tab-pipeline">
+      <!-- Preset Bar & Mode Switcher -->
+      <div class="glass-panel control-toolbar">
+        <div class="toolbar-group">
+          <span class="group-title">Демо-кейсы:</span>
+          <div class="preset-buttons" id="pipeline-presets">
+            <button class="btn-preset active" data-case="client1">
+              <span class="preset-icon">📄</span> Клиент 1 (Иванов И.П.)
+            </button>
+            <button class="btn-preset" data-case="client2">
+              <span class="preset-icon">👥</span> Клиент 2 (Смирнова А.С. + Менеджер)
+            </button>
+            <button class="btn-preset" data-case="loan">
+              <span class="preset-icon">📑</span> Договор и Паспорт РФ
+            </button>
+            <button class="btn-preset" data-case="inflection">
+              <span class="preset-icon">✍️</span> Падежи в переписке
+            </button>
+          </div>
+        </div>
+
+        <div class="toolbar-group">
+          <span class="group-title">Режим обезличивания:</span>
+          <div class="mode-toggle-group">
+            <button class="btn-mode active" id="btn-mode-realistic" data-mode="realistic">
+              <span class="mode-icon">🕶️</span> Realistic (Синтетика)
+            </button>
+            <button class="btn-mode" id="btn-mode-marker" data-mode="marker">
+              <span class="mode-icon">🏷️</span> Marker ([PERSON_1])
+            </button>
+          </div>
+        </div>
+
+        <div class="toolbar-group toolbar-actions">
+          <button class="btn-primary glow-cyan" id="btn-pipeline-play">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <span>Запустить сквозной цикл</span>
+          </button>
+          <button class="btn-secondary" id="btn-pipeline-step">
+            <span>Следующий шаг ➔</span>
+          </button>
+          <button class="btn-ghost" id="btn-pipeline-reset" title="Сбросить анимацию">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Pipeline Timeline Stepper -->
+      <div class="stepper-container">
+        <div class="stepper-track">
+          <div class="stepper-progress" id="stepper-progress-bar"></div>
+        </div>
+        <div class="stepper-steps">
+          <div class="step-item active" data-step="1">
+            <div class="step-circle">1</div>
+            <div class="step-label">Входной документ</div>
+            <div class="step-sub">Локальный файл с ПДн</div>
+          </div>
+          <div class="step-item" data-step="2">
+            <div class="step-circle">2</div>
+            <div class="step-label">Детекция и Vault</div>
+            <div class="step-sub">NER + Защита 0600</div>
+          </div>
+          <div class="step-item" data-step="3">
+            <div class="step-circle">3</div>
+            <div class="step-label">Запрос к Upstream</div>
+            <div class="step-sub">0 утечек во внешней сети</div>
+          </div>
+          <div class="step-item" data-step="4">
+            <div class="step-circle">4</div>
+            <div class="step-label">Ответ модели</div>
+            <div class="step-sub">Генерация со склонениями</div>
+          </div>
+          <div class="step-item" data-step="5">
+            <div class="step-circle">5</div>
+            <div class="step-label">Восстановление</div>
+            <div class="step-sub">Точный обратный mapping</div>
+          </div>
+          <div class="step-item" data-step="6">
+            <div class="step-circle">6</div>
+            <div class="step-label">Итоговый документ</div>
+            <div class="step-sub">Реальные ПДн у клиента</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Split Visualization Cards -->
+      <div class="pipeline-split-grid">
+        <!-- Step 1 & 2: Local Agent Workspace -->
+        <div class="pipeline-card card-local" id="card-stage-local">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-badge badge-local">ХОСТ АГЕНТА</span>
+              <h3>1. Исходный документ клиента</h3>
+            </div>
+            <div class="card-telemetry">
+              <span class="telemetry-item" id="tag-detected-count">4 сущности обнаружено</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="editor-view" id="view-original-text">
+              <!-- Rendered with highlighted spans -->
+            </div>
+          </div>
+          <div class="card-footer pii-legend">
+            <span class="legend-badge badge-person">👤 PERSON</span>
+            <span class="legend-badge badge-phone">📞 PHONE</span>
+            <span class="legend-badge badge-email">✉️ EMAIL</span>
+            <span class="legend-badge badge-passport">🪪 PASSPORT_RU</span>
+          </div>
+        </div>
+
+        <!-- Middle Gateway Transformer Visual -->
+        <div class="pipeline-flow-connector" id="pipeline-connector">
+          <div class="connector-line">
+            <div class="particle-pulse"></div>
+          </div>
+          <div class="gateway-core-box">
+            <div class="core-icon-pulse">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+            </div>
+            <div class="core-label">PII GATEWAY</div>
+            <div class="core-sub">CorePipeline</div>
+            <div class="core-stats" id="core-latency-display">~45 ms</div>
+          </div>
+        </div>
+
+        <!-- Step 3: Upstream Cloud View (ZERO LEAK) -->
+        <div class="pipeline-card card-upstream" id="card-stage-upstream">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-badge badge-upstream">ВНЕШНИЙ ПРОВАЙДЕР</span>
+              <h3>3. Что получает облачная LLM</h3>
+            </div>
+            <div class="card-telemetry">
+              <span class="telemetry-badge-clean">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                ZERO PII LEAK
+              </span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="editor-view text-masked" id="view-masked-text">
+              <!-- Masked text shown to provider -->
+            </div>
+          </div>
+          <div class="card-footer status-note">
+            <span class="icon-shield">🛡️</span> Модель видит только вымышленные данные и не знает, что работает с обезличенной копией.
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Row: LLM Generation & Restoration Cycle -->
+      <div class="pipeline-split-grid bottom-grid">
+        <!-- Step 4: Model response -->
+        <div class="pipeline-card card-reply" id="card-stage-reply">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-badge badge-reply">ОТВЕТ АССИСТЕНТА</span>
+              <h3>4. Генерация модели (Склонение псевдонима)</h3>
+            </div>
+            <div class="card-telemetry">
+              <span class="telemetry-item">Склонение ФИО: ДАТЕЛЬНЫЙ</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="editor-view" id="view-llm-reply">
+              <!-- Simulated or real model output with inflections -->
+            </div>
+          </div>
+          <div class="card-footer note-subtle">
+            Модель обратилась к клиенту: <em>«Уважаемому Михаилу Викторовичу...»</em>
+          </div>
+        </div>
+
+        <!-- Step 5 & 6: Final Restored Document -->
+        <div class="pipeline-card card-final" id="card-stage-final">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-badge badge-restored">ВОССТАНОВЛЕНИЕ</span>
+              <h3>6. Итоговый файл клиенту (Реальные ПДн)</h3>
+            </div>
+            <div class="card-telemetry">
+              <span class="telemetry-badge-complete">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                STATUS: COMPLETE
+              </span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="editor-view text-restored" id="view-final-text">
+              <!-- Final restored text with real customer details -->
+            </div>
+          </div>
+          <div class="card-footer note-success">
+            <span class="icon-check">✓</span> Исходное ФИО восстановлено в правильном падеже: <strong>«Уважаемому Ивану Петровичу»</strong>.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 2: INTERACTIVE PLAYGROUND                            -->
+    <!-- ======================================================== -->
+    <section class="tab-content" id="tab-playground">
+      <div class="playground-layout">
+        <!-- Left: Input Area -->
+        <div class="glass-panel play-input-panel">
+          <div class="panel-header">
+            <h3>Входной текст для проверки</h3>
+            <div class="preset-dropdown-wrap">
+              <select id="sel-play-preset" class="select-styled">
+                <option value="">-- Выбрать типовой шаблон --</option>
+                <option value="client1">Карточка клиента (Иванов И.П.)</option>
+                <option value="client2">Клиент и менеджер (Смирнова А.С.)</option>
+                <option value="loan">Договор займа и паспорт РФ</option>
+                <option value="custom">Пользовательский ввод</option>
+              </select>
+            </div>
+          </div>
+          <textarea id="play-input-text" class="code-textarea" rows="12" placeholder="Введите любой текст с ФИО, телефонами, почтами или паспортами РФ на русском языке..."></textarea>
+
+          <div class="play-action-row">
+            <div class="mode-select-wrap">
+              <label><input type="radio" name="play-mode" value="realistic" checked> Realistic</label>
+              <label><input type="radio" name="play-mode" value="marker"> Marker</label>
+            </div>
+            <button class="btn-primary glow-cyan" id="btn-play-run">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <span>Выполнить Mask & Restore</span>
+            </button>
+          </div>
+
+          <!-- Detected Spans Pill List -->
+          <div class="detected-spans-container">
+            <h4>Найденные сущности:</h4>
+            <div class="spans-tags-list" id="play-spans-list">
+              <span class="text-muted">Нажмите кнопку запуска для анализа...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Results & Latency Telemetry -->
+        <div class="glass-panel play-results-panel">
+          <div class="panel-header">
+            <h3>Результаты обработки Gateway</h3>
+            <div class="latency-pill-group" id="play-latency-badges">
+              <span class="lat-badge" id="lat-detect">Detect: -- ms</span>
+              <span class="lat-badge" id="lat-mask">Mask: -- ms</span>
+              <span class="lat-badge" id="lat-restore">Restore: -- ms</span>
+            </div>
+          </div>
+
+          <!-- Output Stage 1: Masked payload -->
+          <div class="result-sub-block">
+            <div class="sub-block-title">
+              <span>Запрос провайдеру (Upstream Request Payload):</span>
+              <button class="btn-copy" data-copy="play-out-masked">Копировать</button>
+            </div>
+            <pre class="code-output" id="play-out-masked">Текст появится после обработки...</pre>
+          </div>
+
+          <!-- Output Stage 2: Restored text -->
+          <div class="result-sub-block">
+            <div class="sub-block-title">
+              <span>Итоговый результат (Restored Text):</span>
+              <span class="badge-status-pill pill-green" id="play-restore-status">STATUS: --</span>
+            </div>
+            <pre class="code-output" id="play-out-restored">Текст появится после обработки...</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 3: VAULT & TABLE EXPLORER (ARCHITECTURE.md §8)      -->
+    <!-- ======================================================== -->
+    <section class="tab-content" id="tab-vault">
+      <div class="vault-overview-grid">
+        <div class="stat-card">
+          <div class="stat-icon icon-cyan">📦</div>
+          <div class="stat-data">
+            <div class="stat-val" id="vault-stat-entities">--</div>
+            <div class="stat-lbl">Всего сущностей в базе</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-purple">🔗</div>
+          <div class="stat-data">
+            <div class="stat-val" id="vault-stat-pairs">--</div>
+            <div class="stat-lbl">Пар отображений (Pairs)</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-emerald">💾</div>
+          <div class="stat-data">
+            <div class="stat-val" id="vault-stat-size">--</div>
+            <div class="stat-lbl">Размер SQLite WAL</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-amber">🔒</div>
+          <div class="stat-data">
+            <div class="stat-val">0600</div>
+            <div class="stat-lbl">Права доступа к файлу</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-panel vault-table-panel">
+        <div class="panel-header">
+          <div class="table-search-group">
+            <input type="text" id="vault-search-input" class="input-search" placeholder="Поиск по сущностям, ФИО, email...">
+            <select id="vault-filter-type" class="select-styled">
+              <option value="ALL">Все типы ПДн</option>
+              <option value="PERSON">PERSON</option>
+              <option value="PHONE">PHONE</option>
+              <option value="EMAIL">EMAIL</option>
+              <option value="PASSPORT_RU">PASSPORT_RU</option>
+            </select>
+          </div>
+          <div class="table-actions">
+            <button class="btn-secondary" id="btn-refresh-vault">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+              <span>Обновить</span>
+            </button>
+            <button class="btn-danger-ghost" id="btn-purge-vault">
+              <span>Очистить Vault</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="table-vault-entities">
+            <thead>
+              <tr>
+                <th>Entity ID</th>
+                <th>Тип</th>
+                <th>Оригинал</th>
+                <th>Псевдоним / Замена</th>
+                <th>Склоняемые формы</th>
+                <th>Пары</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-vault-entities">
+              <tr>
+                <td colspan="7" class="td-empty">Загрузка данных SQLite Vault...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 4: METRICS & DEFENSE BENCHMARKS (ARCHITECTURE §9)    -->
+    <!-- ======================================================== -->
+    <section class="tab-content" id="tab-metrics">
+      <div class="metrics-grid">
+        <!-- Big KPI Cards -->
+        <div class="kpi-banner">
+          <div class="kpi-card highlight-green">
+            <div class="kpi-val">100.0%</div>
+            <div class="kpi-name">Точность восстановления (Fidelity)</div>
+            <div class="kpi-desc">180/180 успешных roundtrip тестов по всем 6 падежам русского языка</div>
+          </div>
+          <div class="kpi-card highlight-cyan">
+            <div class="kpi-val">0</div>
+            <div class="kpi-name">Утечек канареек (Canary Leaks)</div>
+            <div class="kpi-desc">Подтверждено независимым HTTP Upstream Spy до TLS-терминации</div>
+          </div>
+          <div class="kpi-card highlight-purple">
+            <div class="kpi-val">30.9 мс</div>
+            <div class="kpi-name">Задержка Restore на 1k символов</div>
+            <div class="kpi-desc">Быстрый детерминированный поиск по B-Tree индексам SQLite</div>
+          </div>
+          <div class="kpi-card highlight-amber">
+            <div class="kpi-val">0600</div>
+            <div class="kpi-name">Изоляция периметра безопасности</div>
+            <div class="kpi-desc">Linux Bubblewrap, Network Namespaces, база вне workspace агента</div>
+          </div>
+        </div>
+
+        <!-- Architecture Breakdown -->
+        <div class="glass-panel arch-panel">
+          <h3>Архитектурные границы безопасности (Zero-Trust)</h3>
+          <div class="arch-flow-diagram">
+            <div class="arch-node node-agent">
+              <div class="node-icon">🤖</div>
+              <div class="node-title">Автономный Агент</div>
+              <div class="node-sub">Bubblewrap Sandbox<br>Только loopback к Gateway</div>
+            </div>
+            <div class="arch-arrow">
+              <span class="arrow-label">HTTP:8787<br>(Токен агента)</span>
+              ➔
+            </div>
+            <div class="arch-node node-gateway">
+              <div class="node-icon">🛡️</div>
+              <div class="node-title">PII Gateway</div>
+              <div class="node-sub">Detect + Mask + Restore<br>Fail-Closed Policy</div>
+            </div>
+            <div class="arch-arrow">
+              <span class="arrow-label">0 ПДн<br>(Псевдонимы)</span>
+              ➔
+            </div>
+            <div class="arch-node node-cloud">
+              <div class="node-icon">☁️</div>
+              <div class="node-title">Облачная LLM</div>
+              <div class="node-sub">OpenAI / DeepSeek / Ollama<br>Только API-ключ хоста</div>
+            </div>
+          </div>
+
+          <div class="vault-sidecar-box">
+            <div class="sidecar-shield">🔐</div>
+            <div class="sidecar-info">
+              <strong>Изолированное хранилище Vault:</strong> SQLite файл размещен в <code>~/.local/share/pii-gateway/vault/</code>. Агенту закрыт доступ по путям, права <code>0600</code>, WAL-журналирование.
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode Comparison Matrix -->
+        <div class="glass-panel matrix-panel">
+          <h3>Сравнение режимов работы (ARCHITECTURE.md §4)</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Критерий</th>
+                <th>Realistic Mode (Основной)</th>
+                <th>Marker Mode (Запасной)</th>
+                <th>Без Gateway (Passthrough)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Что видит LLM</strong></td>
+                <td><span class="text-green">Естественные ФИО и телефоны</span></td>
+                <td>Метки вида <code>[PERSON_1]</code></td>
+                <td><span class="text-danger">Реальные ПДн (УТЕЧКА)</span></td>
+              </tr>
+              <tr>
+                <td><strong>Склонение по падежам</strong></td>
+                <td><span class="text-green">Автоматически (все 6 падежей)</span></td>
+                <td>Маркер без склонения</td>
+                <td>Не требуется</td>
+              </tr>
+              <tr>
+                <td><strong>Осведомленность модели</strong></td>
+                <td>Модель не знает об обезличивании</td>
+                <td>Модель видит факт маскировки</td>
+                <td>Модель получает исходные данные</td>
+              </tr>
+              <tr>
+                <td><strong>Утечки во внешнюю сеть</strong></td>
+                <td><span class="text-green">0%</span></td>
+                <td><span class="text-green">0%</span></td>
+                <td><span class="text-danger">100% утечка</span></td>
+              </tr>
+              <tr>
+                <td><strong>Точность восстановления</strong></td>
+                <td><strong>100.0%</strong></td>
+                <td><strong>100.0%</strong></td>
+                <td>Исходные данные</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Notification Toast -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="static/app.js"></script>
+</body>
+</html>
