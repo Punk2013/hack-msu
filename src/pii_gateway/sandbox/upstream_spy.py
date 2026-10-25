@@ -23,6 +23,14 @@ class Observation:
     expected: bool
 
 
+@dataclass(frozen=True)
+class SpyResponse:
+    """Trusted scripted HTTP response, for example an SSE fixture."""
+
+    body: bytes
+    content_type: str
+
+
 class UpstreamSpy:
     """Observe requests in memory and retain counts/IDs, never bodies or keys.
 
@@ -36,7 +44,7 @@ class UpstreamSpy:
         port: int = 0,
         reply_text: str = "ok",
         *,
-        responder: Callable[[dict], dict] | None = None,
+        responder: Callable[[dict], dict | SpyResponse] | None = None,
     ):
         self.scanner = scanner
         self.port = port
@@ -211,10 +219,15 @@ class UpstreamSpy:
                     if status == 200
                     else {"error": {"message": "unsupported synthetic request"}}
                 )
+                content_type = "application/json"
                 try:
                     if status == 200 and owner.responder is not None:
                         payload = owner.responder(request)
-                    encoded = json.dumps(payload, ensure_ascii=False).encode()
+                    if isinstance(payload, SpyResponse):
+                        encoded = payload.body
+                        content_type = payload.content_type
+                    else:
+                        encoded = json.dumps(payload, ensure_ascii=False).encode()
                 except Exception:
                     # A broken scripted provider cannot hide a leak or look clean.
                     status = 500
@@ -223,7 +236,7 @@ class UpstreamSpy:
                     body, status, fully_scanned=fully_scanned, expected=expected and status == 200
                 )
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("Connection", "close")
                 self.end_headers()
