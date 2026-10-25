@@ -162,3 +162,21 @@ def test_two_people_never_share_a_restorable_short_form(monkeypatch):
     assert sa != sb
     assert restore(f"Господин {sb}", ctx).text == "Господин Петров"
     assert restore(f"Господин {sa}", ctx).text == "Господин Иванов"
+
+
+def test_same_original_surname_for_two_people_does_not_abort(monkeypatch):
+    # reproduction from IldwayS's review of #36: both fakes get the same surname
+    from types import SimpleNamespace
+
+    ids = iter([2, 8])
+    monkeypatch.setattr(
+        "pii_gateway.pseudo.engine.uuid.uuid4",
+        lambda: SimpleNamespace(hex=f"{next(ids):032x}"[::-1]),
+    )
+    ctx = Context("shared-original-surname")
+    for raw in ("Иван Петрович Иванов", "Пётр Александрович Иванов"):
+        text = f"ФИО: {raw}."
+        masked = mask(text, spans_for(text, (raw, PiiType.PERSON)), ctx).text
+        assert restore(masked, ctx).text == text
+        surname = masked.removeprefix("ФИО: ").removesuffix(".").split()[-1]
+        assert restore(f"Господин {surname}", ctx).text == "Господин Иванов"

@@ -242,20 +242,29 @@ def _person_pairs(
             o_text = raw  # keep the exact spelling the user wrote
         if pairs.get(f_text, o_text) != o_text:
             return None  # one fake form would restore to two originals
-        known = vault.get_pair(f_text)
-        if f_text == o_text or vault.is_known_original(f_text) or known not in (None, o_text):
+        known = vault.get_pair_entry(f_text)
+        if f_text == o_text or vault.is_known_original(f_text) or known not in (
+            None,
+            (o_text, entity_id),
+        ):
             return None
         pairs[f_text] = o_text
         roles = [t.role for t in name.tokens]
         for f_var, o_var in _variants(roles, fake, orig):
             if f_var in pairs or extra.get(f_var, o_var) != o_var:
                 extra[f_var] = ""  # ambiguous within this person: never restore it
-            elif vault.get_pair(f_var) not in (None, o_var) or vault.is_known_original(f_var):
-                # another person already owns this short form (same fake surname):
-                # "Господин Новиков" would restore to the wrong client, pick another fake
+            elif vault.is_known_original(f_var):
                 return None
             else:
-                extra[f_var] = o_var
+                owner = vault.get_pair_entry(f_var)
+                if owner is None or owner == (o_var, entity_id):
+                    extra[f_var] = o_var
+                elif owner[0] != o_var:
+                    # another person already owns this short form (same fake surname):
+                    # "Господин Новиков" would restore to the wrong client, pick another fake
+                    return None
+                # else: another person with the same original short form ("Иванов");
+                # the existing pair already restores it correctly, do not rebind it
     return pairs | {f: o for f, o in extra.items() if o and f not in pairs}
 
 
