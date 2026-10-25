@@ -6,7 +6,9 @@
   fakes for structured values; marker ([PERSON_1]) only as a fallback.
 - restore() replaces only replacements recorded in the vault and never guesses.
 - Corrupted/malformed markers ([PERSON_1, [PERSON_x], [PERSON_1 ]) return PARTIAL.
-- Literal user markers in input text are reserved so newly issued markers never collide.
+- Literal user markers in input text are reserved and escaped so they never collide.
+- Distinct surface forms get distinct lossless markers so original cases are preserved.
+- Full names with conflicting first names never merge via partial single matching.
 """
 
 from __future__ import annotations
@@ -183,8 +185,12 @@ def _analyze_name(raw: str) -> _Name | None:
             tokens = []
             for fit in chosen:
                 p = next(p for p in fit if p.tag.case == case)
-                role = next(r for r in ROLES if r in p.tag.grammemes)
+                role = next((r for r in ROLES if r in p.tag.grammemes), None)
+                if role is None:
+                    continue
                 tokens.append(_Token(role, p.normal_form, p))
+            if not tokens or len(tokens) != len(words):
+                continue
             roles = [t.role for t in tokens]
             if len(set(roles)) != len(roles):
                 return None
@@ -248,31 +254,42 @@ def _normalize(kind: PiiType, raw: str) -> str:
 
 
 def _resolve_entity(
-    vault: Vault, kind: PiiType, keys: list[str], is_partial: bool = False
+    vault: Vault,
+    kind: PiiType,
+    lookup_keys: list[str],
+    all_keys: list[str],
+    is_partial: bool = False,
 ) -> tuple[str, str]:
-    """keys[0] is the full key, the rest are partial ones; returns (entity_id, linked_by)."""
-    found, entity_id = vault.get_key(keys[0])
+    """lookup_keys[0] is the primary key; returns (entity_id, linked_by)."""
+    found, entity_id = vault.get_key(lookup_keys[0])
     if found and entity_id is not None:
         return entity_id, "partial_single" if is_partial else "exact"
     if not found:
         owners = set()
-        for key in keys[1:]:
+        for key in lookup_keys[1:]:
             k_found, owner = vault.get_key(key)
             if k_found:
-                owners.add(owner)
+                if owner is None:
+                    owners.add(None)
+                else:
+                    owners.add(owner)
         if len(owners) == 1 and None not in owners:
             entity_id = owners.pop()
-            for key in keys:
+            for key in all_keys:
                 vault.add_key(key, entity_id)
             return entity_id, "partial_single"
     if found:  # partial name shared by several people: its own stable entity
-        keys = [f"ambiguous|{keys[0]}"]
-        a_found, entity_id = vault.get_key(keys[0])
+        amb_key = f"ambiguous|{lookup_keys[0]}"
+        a_found, entity_id = vault.get_key(amb_key)
         if a_found and entity_id is not None:
             return entity_id, "new"
+        entity_id = f"ent_{uuid.uuid4().hex[:12]}"
+        vault.add_entity(entity_id, kind, is_ambiguous=True)
+        vault.add_key(amb_key, entity_id)
+        return entity_id, "new"
     entity_id = f"ent_{uuid.uuid4().hex[:12]}"
-    vault.add_entity(entity_id, kind, is_ambiguous=found)
-    for key in keys:
+    vault.add_entity(entity_id, kind, is_ambiguous=False)
+    for key in all_keys:
         vault.add_key(key, entity_id)
     return entity_id, "new"
 
@@ -291,18 +308,27 @@ def _replace_one(vault: Vault, span: EntitySpan, ctx: Context) -> tuple[str, Rep
     name = _analyze_name(raw) if kind is PiiType.PERSON else None
     if name is not None:
         roles = tuple(t.role for t in name.tokens)
-        is_partial = len(roles) == 1
+        has_name = "Name" in roles
+        is_partial = ("Surn" not in roles) or ("Name" not in roles)
         partial = [
             name.key(sub)
             for n in range(len(roles) - 1, 0, -1)
             for sub in combinations(roles, n)
             if sub not in (("Name",), ("Patr",))
         ]
-        keys = [name.key(roles), *partial]
+        # Candidate lookup keys: if mention specifies a personal Name, we must
+        # never link via a surname-only subkey (to avoid merging "Пётр Петров" with "Иван Петров")
+        lookup_keys = [name.key(roles)] + [
+            k for k in partial if not has_name or "Name:" in k
+        ]
+        all_keys = [name.key(roles), *partial]
     else:
         is_partial = False
-        keys = [f"{kind}|{_normalize(kind, raw)}"]
-    entity_id, linked_by = _resolve_entity(vault, kind, keys, is_partial=is_partial)
+        lookup_keys = [f"{kind}|{_normalize(kind, raw)}"]
+        all_keys = lookup_keys
+    entity_id, linked_by = _resolve_entity(
+        vault, kind, lookup_keys, all_keys, is_partial=is_partial
+    )
     rep = Replacement(span.start, span.end, entity_id, linked_by, name.case if name else None)
 
     if ctx.mode == "realistic":
@@ -330,10 +356,18 @@ def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
         return MaskResult(text=text, replacements=[])
     try:
         with Vault(ctx.project_id) as vault:
+            existing_pairs = vault.get_pairs()
             # 1. Prevent collision with literal markers already existing in the input text:
             for m in MARKER_PATTERN.finditer(text):
                 m_type, m_id = m.group(1), m.group(2)
                 vault.reserve_marker_index_at_least(m_type, int(m_id))
+
+            # 2. Identify literal markers already in vault and not inside spans to escape:
+            span_ranges = {(s.start, s.end) for s in spans}
+            escaped_literals = []
+            for m in MARKER_PATTERN.finditer(text):
+                if (m.start(), m.end()) not in span_ranges and m.group(0) in existing_pairs:
+                    escaped_literals.append((m.start(), m.end(), m.group(0)))
 
             planned = [_replace_one(vault, span, ctx) for span in spans]
     except MaskError:
@@ -341,16 +375,32 @@ def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
     except Exception as exc:  # never leak input text through third-party errors
         raise MaskError(f"mask failed: {type(exc).__name__}") from None
 
-    out, replacements, pos, shift = [], [], 0, 0
+    # Merge planned replacements and literal escapes (all non-overlapping)
+    all_chunks: list[tuple[int, int, str, Replacement | None]] = []
     for span, (value, rep) in zip(spans, planned, strict=True):
-        out.append(text[pos : span.start])
+        all_chunks.append((span.start, span.end, value, rep))
+    for start, end, raw_marker in escaped_literals:
+        all_chunks.append((start, end, f"\\{raw_marker}", None))
+
+    all_chunks.sort(key=lambda item: item[0])
+
+    out, replacements, pos, shift = [], [], 0, 0
+    for start, end, value, rep in all_chunks:
+        out.append(text[pos:start])
         out.append(value)
-        start = span.start + shift
-        replacements.append(
-            Replacement(start, start + len(value), rep.entity_id, rep.linked_by, rep.form)
-        )
-        shift += len(value) - (span.end - span.start)
-        pos = span.end
+        if rep is not None:
+            new_start = start + shift
+            replacements.append(
+                Replacement(
+                    new_start,
+                    new_start + len(value),
+                    rep.entity_id,
+                    rep.linked_by,
+                    rep.form,
+                )
+            )
+        shift += len(value) - (end - start)
+        pos = end
     out.append(text[pos:])
     return MaskResult(text="".join(out), replacements=replacements)
 
@@ -360,15 +410,16 @@ def restore(text: str, ctx: Context) -> RestoreResult:
         pairs = vault.get_pairs()
     if pairs:
         alternation = "|".join(re.escape(r) for r in sorted(pairs, key=len, reverse=True))
-        pattern = re.compile(rf"(?<!\w)(?:{alternation})(?!\w)|{MARKER_PATTERN.pattern}")
+        pattern = re.compile(rf"(?<!\\)(?:(?<!\w)(?:{alternation})(?!\w)|{MARKER_PATTERN.pattern})")
     else:
-        pattern = MARKER_PATTERN
+        pattern = re.compile(rf"(?<!\\){MARKER_PATTERN.pattern}")
     result: list[str] = []
     unresolved: list[Unresolved] = []
 
-    # Check for corrupted or malformed markers first
+    # Check for corrupted or malformed markers first (excluding escaped ones)
     for m in CORRUPTED_MARKER_PATTERN.finditer(text):
-        unresolved.append(Unresolved(m.start(), m.end(), "unknown_marker"))
+        if m.start() == 0 or text[m.start() - 1] != "\\":
+            unresolved.append(Unresolved(m.start(), m.end(), "unknown_marker"))
 
     pos = out_len = 0
     for match in pattern.finditer(text):
@@ -386,6 +437,10 @@ def restore(text: str, ctx: Context) -> RestoreResult:
         pos = match.end()
     result.append(text[pos:])
 
+    # Unescape escaped literal markers: \[PERSON_1\] -> [PERSON_1]
+    res_str = "".join(result)
+    res_str = re.sub(rf"\\(\[({TYPES_PATTERN})_\d+\])", r"\1", res_str)
+
     unresolved.sort(key=lambda u: u.start)
     status = RestoreStatus.PARTIAL if unresolved else RestoreStatus.COMPLETE
-    return RestoreResult(text="".join(result), status=status, unresolved=unresolved)
+    return RestoreResult(text=res_str, status=status, unresolved=unresolved)

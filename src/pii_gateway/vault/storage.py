@@ -412,6 +412,14 @@ class Vault:
         ).fetchone()
         return None if row is None else str(row["original"])
 
+    def get_marker_by_original(self, original: str, entity_id: str) -> str | None:
+        query = (
+            "SELECT replacement FROM pairs "
+            "WHERE original = ? AND entity_id = ? AND replacement LIKE '[%]' LIMIT 1"
+        )
+        row = self._get_connection().execute(query, (original, entity_id)).fetchone()
+        return None if row is None else str(row["replacement"])
+
     def add_pair(self, replacement: str, original: str, entity_id: str) -> None:
         """First original wins: a replacement never changes meaning once issued."""
         conn = self._get_connection()

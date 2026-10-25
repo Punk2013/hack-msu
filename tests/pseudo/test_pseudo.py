@@ -278,3 +278,64 @@ def test_vault_concurrent_counter_atomicity(tmp_path: Path):
     # All 50 increments must be unique and span 1..50
     assert len(set(results)) == 50
     assert sorted(results) == list(range(1, 51))
+
+
+def test_different_full_names_with_same_surname_do_not_link():
+    ctx = Context(project_id="test_diff_names_same_surn", mode="marker")
+    s1 = [EntitySpan(0, 11, PiiType.PERSON, "Иван Петров", detector="test")]
+    m1 = mask("Иван Петров", s1, ctx)
+
+    s2 = [EntitySpan(0, 11, PiiType.PERSON, "Пётр Петров", detector="test")]
+    m2 = mask("Пётр Петров", s2, ctx)
+
+    assert m1.replacements[0].entity_id != m2.replacements[0].entity_id
+    assert m1.replacements[0].linked_by == "new"
+    assert m2.replacements[0].linked_by == "new"
+    assert m1.text != m2.text
+
+    # Restoring each returns the exact original person without cross-contamination
+    r1 = restore(m1.text, ctx)
+    r2 = restore(m2.text, ctx)
+    assert r1.text == "Иван Петров"
+    assert r2.text == "Пётр Петров"
+
+
+def test_realistic_mode_preserves_distinct_surface_cases():
+    ctx = Context(project_id="test_realistic_surfaces", mode="realistic")
+    t1 = "Иван Петрович Иванов"
+    s1 = [EntitySpan(0, 20, PiiType.PERSON, t1, detector="test")]
+    m1 = mask(t1, s1, ctx)
+
+    t2 = "Ивану Петровичу Иванову"
+    s2 = [EntitySpan(0, 23, PiiType.PERSON, t2, detector="test")]
+    m2 = mask(t2, s2, ctx)
+
+    # Both refer to the same entity
+    assert m1.replacements[0].entity_id == m2.replacements[0].entity_id
+
+    # In realistic mode, both are inflected and restore losslessly to their exact original cases
+    assert restore(m1.text, ctx).text == t1
+    assert restore(m2.text, ctx).text == t2
+
+
+def test_existing_literal_marker_is_not_corrupted_on_roundtrip():
+    ctx = Context(project_id="test_literal_existing_marker", mode="marker")
+    # Step 1: establish [PERSON_1] in vault for Ivan Ivanov
+    s1 = [EntitySpan(0, 11, PiiType.PERSON, "Иван Иванов", detector="test")]
+    m1 = mask("Иван Иванов", s1, ctx)
+    assert m1.text == "[PERSON_1]"
+
+    # Step 2: input document literally contains "[PERSON_1]" as user text,
+    # with a span only on Petr Petrov
+    text2 = "Literal [PERSON_1]; Пётр Петров"
+    s2 = [EntitySpan(20, 31, PiiType.PERSON, "Пётр Петров", detector="test")]
+    m2 = mask(text2, s2, ctx)
+
+    # The newly issued marker must not collide with the literal [PERSON_1]
+    assert "[PERSON_2]" in m2.text
+
+    # Restoration must preserve the literal [PERSON_1] exactly,
+    # without corrupting it into Ivan Ivanov
+    r2 = restore(m2.text, ctx)
+    assert r2.text == text2
+    assert r2.status == RestoreStatus.COMPLETE
