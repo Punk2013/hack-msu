@@ -78,14 +78,15 @@ def _calls(said: dict, got: dict) -> list[tuple[str, str, str]]:
 def build(journal: Path) -> str:
     records = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()
                if line.strip()]
-    sections, seen, masked_total, restored_total = [], 0, 0, 0
+    sections, masked_total, restored_total = [], 0, 0
     for n, rec in enumerate(records, 1):
         real_in, sent = rec.get("request_in", []), rec.get("request_out", [])
         new = []
-        for real_msg, sent_msg in list(zip(real_in, sent, strict=False))[seen:]:
+        # Each exchange shows its full request, including retries and rewritten
+        # or compacted history. Message count is not a stable message identity.
+        for real_msg, sent_msg in zip(real_in, sent, strict=False):
             for real_text, sent_text in zip(_texts(real_msg), _texts(sent_msg), strict=False):
                 new.append((real_msg.get("role", ""), real_text, sent_text))
-        seen = len(real_in)
         req_rows, req_changes = _rows(new, left_is_real=True)
         resp_rows, resp_changes = _rows(
             _calls(rec.get("model_said", {}), rec.get("agent_got", {})), left_is_real=False
