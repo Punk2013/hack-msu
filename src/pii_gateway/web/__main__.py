@@ -27,7 +27,7 @@ def open_browser_delayed(url: str, delay: float = 1.0) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pii-showcase",
-        description="Launch the PII Gateway interactive presentation dashboard.",
+        description="Launch the PII Gateway interactive presentation dashboard and local inspector.",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8790, help="Port to listen (default: 8790)")

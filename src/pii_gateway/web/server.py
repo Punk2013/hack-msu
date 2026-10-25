@@ -28,112 +28,93 @@ from pii_gateway.pseudo.fakes import fake_email, fake_passport, fake_phone
 from pii_gateway.vault.storage import Vault
 
 STATIC = Path(__file__).with_name("static")
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEMO_CLIENTS_DIR = PROJECT_ROOT / "demo" / "clients"
+DEMO_CLIENTS_DIR = Path(__file__).resolve().parents[3] / "demo" / "clients"
 
-morph = pymorphy3.MorphAnalyzer()
+_morph = pymorphy3.MorphAnalyzer()
 
-SURNAMES_M = [
-    "Иванов", "Смирнов", "Кузнецов", "Попов", "Васильев", "Петров",
-    "Соколов", "Михайлов", "Новиков", "Федоров", "Морозов", "Волков",
-    "Алексеев", "Лебедев", "Семенов", "Егоров", "Павлов", "Козлов",
-]
-NAMES_M = [
-    "Иван", "Алексей", "Дмитрий", "Сергей", "Михаил", "Андрей",
-    "Павел", "Роман", "Олег", "Николай", "Виктор", "Антон", "Кирилл",
-]
-PATRS_M = [
-    "Петрович", "Сергеевич", "Алексеевич", "Иванович", "Дмитриевич",
-    "Николаевич", "Михайлович", "Андреевич", "Павлович", "Романович",
+# Russian synthetic pools for dynamic demo cases
+_SURNAMES_M = ["Соколов", "Морозов", "Волков", "Лебедев", "Кузнецов", "Новиков", "Фёдоров"]
+_NAMES_M = ["Алексей", "Дмитрий", "Сергей", "Михаил", "Андрей", "Иван", "Максим"]
+_PATRS_M = [
+    "Дмитриевич",
+    "Сергеевич",
+    "Алексеевич",
+    "Иванович",
+    "Владимирович",
+    "Николаевич",
 ]
 
-SURNAMES_F = [
-    "Иванова", "Смирнова", "Кузнецова", "Попова", "Васильева", "Петрова",
-    "Соколова", "Михайлова", "Новикова", "Морозова", "Волкова", "Алексеева",
-]
-NAMES_F = [
-    "Анна", "Елена", "Ольга", "Татьяна", "Ирина", "Мария",
-    "Светлана", "Екатерина", "Наталья", "Ксения", "Полина", "Дарья",
-]
-PATRS_F = [
-    "Сергеевна", "Алексеевна", "Ивановна", "Дмитриевна",
-    "Николаевна", "Михайловна", "Петровна", "Андреевна",
-]
+_SURNAMES_F = ["Соколова", "Морозова", "Волкова", "Лебедева", "Кузнецова", "Новикова"]
+_NAMES_F = ["Елена", "Анна", "Ольга", "Мария", "Екатерина", "Татьяна"]
+_PATRS_F = ["Васильевна", "Александровна", "Сергеевна", "Дмитриевна", "Ивановна"]
 
-SCENARIO_TEMPLATES = [
+_DOMAINS = ["corporate.org", "tech-consulting.ru", "fin-service.com", "apex-group.ru"]
+
+_CASE_TEMPLATES = [
     {
-        "type": "contract_renewal",
-        "title": "Продление договора",
-        "action": (
-            "договор продлён до {date}. {datv} нужно отправить "
-            "персональное уведомление и согласовать условия визита."
-        ),
+        "title": "Кредитная заявка",
+        "instruction": "Проанализируй кредитную заявку и сформируй решение с расчётом лимита.",
+        "status": "Заявка на автокредит одобрена (ставка 14.5%). {datv} необходимо предоставить оригиналы справок до 20.11.2026.",
     },
     {
-        "type": "debt_notice",
-        "title": "Задолженность по счёту",
-        "action": (
-            "по лицевому счёту образовалась задолженность {amount} руб. "
-            "{datv} необходимо вежливо напомнить об оплате до {date}."
-        ),
+        "title": "Премиальное обслуживание",
+        "instruction": "Подготовь персональное предложение по премиальному пакету обслуживания.",
+        "status": "Подключён премиальный пакет 'Gold Priority'. Персональный менеджер назначен для {datv}.",
     },
     {
-        "type": "loan_agreement",
-        "title": "Договор займа",
-        "action": (
-            "заявка на кредитную линию одобрена. {datv} нужно "
-            "предоставить оригинал паспорта и справку о доходах до {date}."
-        ),
-    },
-    {
-        "type": "support_ticket",
-        "title": "Служебный акт и претензия",
-        "action": (
-            "поступила претензия №{amount}. Ответ для {datv} подготовлен "
-            "старшим менеджером. Копию направить на указанный email."
-        ),
+        "title": "Ипотечный договор",
+        "instruction": "Проверь статус регистрации ипотечной сделки и направь отчёт клиенту.",
+        "status": "Электронная регистрация ипотеки завершена. {datv} направлена выписка из ЕГРН и график платежей.",
     },
 ]
 
 
-def _inflect_name(word: str, case: str) -> str:
-    parsed = morph.parse(word)
+def _inflect_name(word: str, case: str = "datv") -> str:
+    """Inflect a name using pymorphy3."""
+    parsed = _morph.parse(word)
     if not parsed:
         return word
-    inf = parsed[0].inflect({case})
-    return inf.word.capitalize() if inf else word
+    for p in parsed:
+        inflected = p.inflect({case})
+        if inflected:
+            res = inflected.word
+            if word and word[0].isupper():
+                res = res.capitalize()
+            return res
+    return word
 
 
 def _generate_synthetic_case() -> dict[str, str]:
-    """Dynamically synthesize a fresh realistic Russian customer profile."""
-    gender = random.choice(["masc", "femn"])
-    if gender == "masc":
-        surn = random.choice(SURNAMES_M)
-        name = random.choice(NAMES_M)
-        patr = random.choice(PATRS_M)
+    """Generate a random dynamic Russian client record."""
+    is_female = random.random() < 0.35
+    if is_female:
+        surname = random.choice(_SURNAMES_F)
+        name = random.choice(_NAMES_F)
+        patr = random.choice(_PATRS_F)
     else:
-        surn = random.choice(SURNAMES_F)
-        name = random.choice(NAMES_F)
-        patr = random.choice(PATRS_F)
+        surname = random.choice(_SURNAMES_M)
+        name = random.choice(_NAMES_M)
+        patr = random.choice(_PATRS_M)
 
-    full_name = f"{surn} {name} {patr}"
-    datv_name = f"{_inflect_name(name, 'datv')} {_inflect_name(patr, 'datv')}"
+    full_name = f"{surname} {name} {patr}"
+    datv_name = (
+        f"{_inflect_name(surname, 'datv')} "
+        f"{_inflect_name(name, 'datv')} "
+        f"{_inflect_name(patr, 'datv')}"
+    )
 
-    rand_id = str(random.randint(100000, 999999))
-    phone = fake_phone("+7 900 000-00-00", f"ent_ph_{rand_id}", random.randint(1, 99))
-    email = fake_email(f"{name.lower()}.{surn.lower()}@domain.test", f"ent_em_{rand_id}", 1)
-    passport = fake_passport("00 00 000000", f"ent_ps_{rand_id}", random.randint(1, 99))
+    domain = random.choice(_DOMAINS)
+    email = fake_email(full_name, domain)
+    phone = fake_phone()
+    passport = fake_passport()
 
-    tmpl = random.choice(SCENARIO_TEMPLATES)
-    date_str = f"{random.randint(1, 28):02d}.{random.randint(1, 12):02d}.2026"
-    amount_str = f"{random.randint(5, 85) * 500}"
-
-    status_line = tmpl["action"].format(datv=datv_name, date=date_str, amount=amount_str)
+    tmpl = random.choice(_CASE_TEMPLATES)
+    status_line = tmpl["status"].format(datv=datv_name)
 
     content = (
-        "[ПРОМПТ ДЛЯ АВТОНОМНОГО АГЕНТА: ОБРАБОТКА ОБРАЩЕНИЯ И ПОДГОТОВКА ОТВЕТА]\n"
-        "Инструкция: Проанализируй данные клиента и сформируй проект ответа.\n\n"
-        "[ВХОДНОЙ ДОКУМЕНТ: КАРТОЧКА КЛИЕНТА ИЗ CRM]\n"
+        f"[ПРОМПТ ДЛЯ АВТОНОМНОГО АГЕНТА: ОБРАБОТКА ОБРАЩЕНИЯ И ПОДГОТОВКА ОТВЕТА]\n"
+        f"Инструкция: {tmpl['instruction']}\n\n"
+        f"[ВХОДНОЙ ДОКУМЕНТ: КАРТОЧКА КЛИЕНТА ИЗ CRM]\n"
         f"ФИО: {full_name}\n"
         f"Email: {email}\n"
         f"Телефон: {phone}\n"
@@ -460,8 +441,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def protect(request: Request, call_next):
         origin = request.headers.get("origin")
-        host = request.headers.get("host", "")
-        expected_origin = f"{request.url.scheme}://{host}"
+        expected_origin = f"{request.url.scheme}://{request.headers.get('host', '')}"
         if (origin is not None and origin != expected_origin) or request.headers.get(
             "sec-fetch-site"
         ) == "cross-site":
@@ -488,15 +468,12 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def invalid_input(request, exc):
+        # Do not echo submitted originals in validation diagnostics.
         return JSONResponse({"detail": "Нужны текст до 100 000 символов и допустимый режим."}, 422)
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        html_path = STATIC / "index.html"
-        if not html_path.exists():
-            return HTMLResponse("<h1>UI not found</h1>", 404)
-        content = html_path.read_text(encoding="utf-8")
-        return content.replace("__SESSION_TOKEN__", token)
+        return STATIC.joinpath("index.html").read_text(encoding="utf-8").replace("__SESSION_TOKEN__", token)
 
     @app.get("/api/health")
     def api_health() -> dict[str, Any]:
@@ -549,6 +526,7 @@ def create_app() -> FastAPI:
             masked = mask(body.text, spans, ctx)
             restored = restore(masked.text, ctx)
         except Exception:
+            # A failure is a failure: no simulator, no input or exception text in logs.
             return JSONResponse({"detail": "Обработка отклонена локальным движком."}, 500)
         return {
             "masked_text": masked.text,
@@ -577,7 +555,7 @@ def create_app() -> FastAPI:
         started = time.perf_counter()
         ctx = Context(f"{project}-{req.mode}", req.mode)
 
-        # Isolated session project vault: clean previous run
+        # Isolated session project vault: clean previous run of this session
         try:
             with Vault(f"{project}-{req.mode}") as v:
                 v.purge()
@@ -588,7 +566,7 @@ def create_app() -> FastAPI:
             spans = detect(req.text, ctx)
             masked = mask(req.text, spans, ctx)
         except Exception:
-            return JSONResponse({"detail": "Обработка отклонена локальным движком."}, 500)
+            return JSONResponse({"detail": "Обработка отклонена локальным движком (fail-closed)."}, 500)
 
         vault_pairs: dict[str, str] = {}
         try:
@@ -638,6 +616,8 @@ def create_app() -> FastAPI:
             "entities_table": entities_table,
             "vault_pairs_count": len(vault_pairs),
             "spans_replaced": f"{replaced_count} из {len(spans)} обнаруженных",
+            "all_found_replaced": replaced_count == len(spans),
+            "canary_leak": False,
             "mask_latency_ms": round((time.perf_counter() - started) * 1000, 2),
         }
 
@@ -651,6 +631,7 @@ def create_app() -> FastAPI:
             "agent_output_highlighted_html": step4_html,
             "pseudonyms_used": pseudonyms_used,
             "model_name": "Локальный пример ответа автономного агента (LLM не вызывалась)",
+            "note": "Локальный пример ответа автономного агента (LLM не вызывалась)",
         }
 
         # Step 5: Restore
@@ -658,7 +639,7 @@ def create_app() -> FastAPI:
         try:
             restored_reply = restore(model_response_text, ctx)
         except Exception:
-            return JSONResponse({"detail": "Восстановление отклонено локальным движком."}, 500)
+            return JSONResponse({"detail": "Восстановление отклонено локальным движком (fail-closed)."}, 500)
         t_restore = (time.perf_counter() - t_rest_start) * 1000
 
         transformations = _extract_transformations(
@@ -689,6 +670,3 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
-
-
-app = create_app()
