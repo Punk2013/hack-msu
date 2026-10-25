@@ -249,8 +249,12 @@ def _person_pairs(
         roles = [t.role for t in name.tokens]
         for f_var, o_var in _variants(roles, fake, orig):
             if f_var in pairs or extra.get(f_var, o_var) != o_var:
-                extra[f_var] = ""  # ambiguous variant: never restore it
-            elif vault.get_pair(f_var) in (None, o_var) and not vault.is_known_original(f_var):
+                extra[f_var] = ""  # ambiguous within this person: never restore it
+            elif vault.get_pair(f_var) not in (None, o_var) or vault.is_known_original(f_var):
+                # another person already owns this short form (same fake surname):
+                # "Господин Новиков" would restore to the wrong client, pick another fake
+                return None
+            else:
                 extra[f_var] = o_var
     return pairs | {f: o for f, o in extra.items() if o and f not in pairs}
 

@@ -145,3 +145,20 @@ def test_name_and_patronymic_without_surname_link_and_restore():
     first, patr, _ = result.text.removeprefix("ФИО: ").split(".")[0].split()
     assert result.text.split(". ")[1].startswith(first[:-1])  # same fake given name, declined
     assert restore(f"Уважаемая {first} {patr}!", ctx).text == "Уважаемая Анна Сергеевна!"
+
+
+def test_two_people_never_share_a_restorable_short_form(monkeypatch):
+    # reproduction from review of #36: fixed UUIDs made both fakes "… Новиков"
+    import uuid as uuid_mod
+
+    ids = iter([uuid_mod.UUID(int=1 << 80), uuid_mod.UUID(int=13 << 80)])
+    monkeypatch.setattr("pii_gateway.pseudo.engine.uuid.uuid4", lambda: next(ids))
+    ctx = Context("shared-surname")
+    a, b = "ФИО: Иван Петрович Иванов.", "ФИО: Пётр Сергеевич Петров."
+    fa = mask(a, spans_for(a, ("Иван Петрович Иванов", PiiType.PERSON)), ctx).text
+    fb = mask(b, spans_for(b, ("Пётр Сергеевич Петров", PiiType.PERSON)), ctx).text
+    sa = fa.removeprefix("ФИО: ").removesuffix(".").split()[-1]
+    sb = fb.removeprefix("ФИО: ").removesuffix(".").split()[-1]
+    assert sa != sb
+    assert restore(f"Господин {sb}", ctx).text == "Господин Петров"
+    assert restore(f"Господин {sa}", ctx).text == "Господин Иванов"
