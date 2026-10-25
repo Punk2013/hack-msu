@@ -54,17 +54,26 @@ _CASE_TEMPLATES = [
     {
         "title": "Кредитная заявка",
         "instruction": "Проанализируй кредитную заявку и сформируй решение с расчётом лимита.",
-        "status": "Заявка на автокредит одобрена (ставка 14.5%). {datv} необходимо предоставить оригиналы справок до 20.11.2026.",
+        "status": (
+            "Заявка на автокредит одобрена (ставка 14.5%). "
+            "{datv} необходимо предоставить оригиналы справок до 20.11.2026."
+        ),
     },
     {
         "title": "Премиальное обслуживание",
         "instruction": "Подготовь персональное предложение по премиальному пакету обслуживания.",
-        "status": "Подключён премиальный пакет 'Gold Priority'. Персональный менеджер назначен для {datv}.",
+        "status": (
+            "Подключён премиальный пакет 'Gold Priority'. "
+            "Персональный менеджер назначен для {datv}."
+        ),
     },
     {
         "title": "Ипотечный договор",
         "instruction": "Проверь статус регистрации ипотечной сделки и направь отчёт клиенту.",
-        "status": "Электронная регистрация ипотеки завершена. {datv} направлена выписка из ЕГРН и график платежей.",
+        "status": (
+            "Электронная регистрация ипотеки завершена. "
+            "{datv} направлена выписка из ЕГРН и график платежей."
+        ),
     },
 ]
 
@@ -473,7 +482,8 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return STATIC.joinpath("index.html").read_text(encoding="utf-8").replace("__SESSION_TOKEN__", token)
+        html_src = STATIC.joinpath("index.html").read_text(encoding="utf-8")
+        return html_src.replace("__SESSION_TOKEN__", token)
 
     @app.get("/api/health")
     def api_health() -> dict[str, Any]:
@@ -566,7 +576,9 @@ def create_app() -> FastAPI:
             spans = detect(req.text, ctx)
             masked = mask(req.text, spans, ctx)
         except Exception:
-            return JSONResponse({"detail": "Обработка отклонена локальным движком (fail-closed)."}, 500)
+            return JSONResponse(
+                {"detail": "Обработка отклонена локальным движком (fail-closed)."}, 500
+            )
 
         vault_pairs: dict[str, str] = {}
         try:
@@ -639,7 +651,9 @@ def create_app() -> FastAPI:
         try:
             restored_reply = restore(model_response_text, ctx)
         except Exception:
-            return JSONResponse({"detail": "Восстановление отклонено локальным движком (fail-closed)."}, 500)
+            return JSONResponse(
+                {"detail": "Восстановление отклонено локальным движком (fail-closed)."}, 500
+            )
         t_restore = (time.perf_counter() - t_rest_start) * 1000
 
         transformations = _extract_transformations(
