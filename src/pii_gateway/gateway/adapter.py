@@ -32,6 +32,7 @@ REQUEST_FIELDS = {
     "frequency_penalty",
     "seed",
     "parallel_tool_calls",
+    "store",
 }
 BLOCKED_NOTE = "\n[pii-gateway] вызов `{name}` заблокирован политикой: {reason}."
 
@@ -189,6 +190,10 @@ def mask_request(body: dict[str, Any], t: Transformer) -> dict[str, Any]:
             if type(body[key]) is not bool:
                 raise UnsupportedRequest("invalid boolean parameter")
             out[key] = body[key]
+    if "store" in body:  # pi and others send it; the provider must never keep the dialogue
+        if type(body["store"]) is not bool:
+            raise UnsupportedRequest("invalid boolean parameter")
+        out["store"] = False
     if "stream_options" in body:
         options = _object(body["stream_options"], {"include_usage"})
         if any(type(v) is not bool for v in options.values()):
