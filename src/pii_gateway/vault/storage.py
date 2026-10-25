@@ -490,6 +490,13 @@ class Vault:
         ).fetchone()
         return None if row is None else str(row["original"])
 
+    def get_pair_entry(self, replacement: str) -> tuple[str, str] | None:
+        """(original, entity_id) bound to a replacement, or None."""
+        row = self._get_connection().execute(
+            "SELECT original, entity_id FROM pairs WHERE replacement = ?", (replacement,)
+        ).fetchone()
+        return None if row is None else (str(row["original"]), str(row["entity_id"]))
+
     def add_pair(self, replacement: str, original: str, entity_id: str) -> None:
         """Never silently accept a replacement already bound to another value."""
         conn = self._get_connection()
