@@ -188,7 +188,12 @@ def _analyze_name(raw: str) -> _Name | None:
             case = next(c for c in CASES if c in cases)
             tokens = []
             for fit in chosen:
-                p = next(p for p in fit if p.tag.case == case)
+                # declinable reading first: "Анне" is datv of "Анна", not the rare fixed "Анне"
+                p = next(
+                    p
+                    for p in sorted(fit, key=lambda p: "Fixd" in p.tag.grammemes)
+                    if p.tag.case == case
+                )
                 role = next(r for r in ROLES if r in p.tag.grammemes)
                 tokens.append(_Token(role, p.normal_form, p))
             roles = [t.role for t in tokens]
@@ -264,6 +269,8 @@ def _variants(roles: list[str], fake: list[str], orig: list[str]) -> list[tuple[
     out.append((f"{by_role_f['Surn']} {f_init}", f"{by_role_o['Surn']} {o_init}"))
     out.append((f"{f_init} {by_role_f['Surn']}", f"{o_init} {by_role_o['Surn']}"))
     out.append((by_role_f["Surn"], by_role_o["Surn"]))
+    if len(given) == 2:  # "Уважаемая Анна Сергеевна" in a letter
+        out.append((" ".join(by_role_f[r] for r in given), " ".join(by_role_o[r] for r in given)))
     return out
 
 
