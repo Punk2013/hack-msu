@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -50,10 +51,24 @@ class Journal:
     def __init__(self, path: Path) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        os.close(fd)
+        os.close(self._open_private())
+
+    def _open_private(self) -> int:
+        # Validate and secure the same descriptor that will receive the data.
+        # Repeat on every write: the path may have been replaced since startup.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK
+        fd = os.open(self.path, flags, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise OSError("journal must be a regular file with one link")
+            os.fchmod(fd, 0o600)
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
 
     def write(self, record: dict[str, Any]) -> None:
         record = {"ts": time.time(), **record}
-        with self.path.open("a", encoding="utf-8") as f:
+        with os.fdopen(self._open_private(), "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
