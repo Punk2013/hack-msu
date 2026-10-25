@@ -29,12 +29,23 @@ _LABELED_PASSPORT = re.compile(
     r"(?P<value>[0-9]{2}\s*[0-9]{2}\s*(?:(?:№|номер)\s*)?[0-9]{6})(?!\w)",
     re.IGNORECASE,
 )
+# Explicit form fields supplement the news-domain NER. Horizontal separators and
+# a field terminator prevent consuming the next line or truncating a longer name.
+_NAME_WORD = r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)*"
+_HSPACE = r"[ \t\u00a0]"
+_LABELED_PERSON_SOURCE = "regex:person_ru_labeled@1"
+_LABELED_PERSON = re.compile(
+    rf"\b(?i:фио|клиент|менеджер){_HSPACE}*:{_HSPACE}*"
+    rf"(?P<value>{_NAME_WORD}(?:{_HSPACE}+{_NAME_WORD}){{1,2}})"
+    rf"(?={_HSPACE}*(?:$|[\r\n,;.!?]))"
+)
 _RULES = (
     (_EMAIL, PiiType.EMAIL, "regex:email@1", 0),
     (_PHONE, PiiType.PHONE, "regex:phone_ru@1", 0),
     (_LABELED_PHONE, PiiType.PHONE, "regex:phone_ru_labeled@1", "value"),
     (_PASSPORT, PiiType.PASSPORT_RU, "regex:passport_ru@1", 0),
     (_LABELED_PASSPORT, PiiType.PASSPORT_RU, "regex:passport_ru_labeled@1", "value"),
+    (_LABELED_PERSON, PiiType.PERSON, _LABELED_PERSON_SOURCE, "value"),
 )
 _PRIORITY = {PiiType.EMAIL: 0, PiiType.PASSPORT_RU: 1, PiiType.PHONE: 2, PiiType.PERSON: 3}
 _ner_lock = Lock()
@@ -73,12 +84,13 @@ def _person_spans(text: str) -> list[EntitySpan]:
 
 
 def _resolve(text: str, candidates: list[EntitySpan]) -> list[EntitySpan]:
-    # Structured types beat PERSON; within either group prefer the longer span,
-    # then the earlier start, type order and source name. Independent of input order.
+    # Structured types beat PERSON; explicit person fields beat overlapping NER.
+    # Within each tier prefer length, start, type and source, independent of order.
     ranked = sorted(
         candidates,
         key=lambda s: (
             s.type == PiiType.PERSON,
+            s.type == PiiType.PERSON and s.detector != _LABELED_PERSON_SOURCE,
             -(s.end - s.start),
             s.start,
             _PRIORITY[s.type],

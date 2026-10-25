@@ -180,6 +180,7 @@ def test_empty_or_tokenless_input(text):
         "synthetic_v0.jsonl",
         "synthetic_v1.jsonl",
         "synthetic_v2.jsonl",
+        "synthetic_v3.jsonl",
     ],
 )
 def test_corpus_annotations_and_live_output_contract(filename):
