@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from threading import Lock
 
 from pii_gateway.core.types import Context, DetectError, EntitySpan, PiiType, check_spans
 
-# Bounded fields avoid consuming adjacent numbers or sentence punctuation.
+# Match from the start of a local-part run only. Allowing a retry at each "!"
+# would rescan its suffix and make punctuation-only input quadratic.
+_EMAIL_LOCAL = r"\w.!#$%&'*+/=?^`{|}~-"
 _EMAIL = re.compile(
-    r"(?<![\w.+%-])[\w.!#$%&'*+/=?^`{|}~-]+@"
+    rf"(?<![{_EMAIL_LOCAL}])[{_EMAIL_LOCAL}]+@"
     r"[\w](?:[\w-]*[\w])?(?:\.[\w](?:[\w-]*[\w])?)+(?![\w@-])"
 )
-_SEP = r"[\s-]?"
+_SEP = r"[\s\-–—‑]*"
 _NATIONAL_PHONE = rf"(?:\([0-9]{{3}}\)|[0-9]{{3}}){_SEP}[0-9]{{3}}{_SEP}[0-9]{{2}}{_SEP}[0-9]{{2}}"
 _PHONE = re.compile(rf"(?<![\w+])(?:\+7|8){_SEP}{_NATIONAL_PHONE}(?!\w)")
 _LABELED_PHONE = re.compile(
@@ -20,10 +23,10 @@ _LABELED_PHONE = re.compile(
     re.IGNORECASE,
 )
 # A separated 4+6 value is conservatively sensitive even without a label.
-_PASSPORT = re.compile(r"(?<!\w)[0-9]{2}\s?[0-9]{2}\s+[0-9]{6}(?!\w)")
+_PASSPORT = re.compile(r"(?<!\w)[0-9]{2}\s*[0-9]{2}(?:\s+|\s*№\s*)[0-9]{6}(?!\w)")
 _LABELED_PASSPORT = re.compile(
-    r"\b(?:паспорт(?:\s+РФ)?|passport)\s*[:№]?\s*"
-    r"(?P<value>[0-9]{2}\s?[0-9]{2}\s*[0-9]{6})(?!\w)",
+    r"\b(?:паспорт(?:\s+РФ)?|passport)\s*[:№]?\s*(?:серия\s*)?"
+    r"(?P<value>[0-9]{2}\s*[0-9]{2}\s*(?:(?:№|номер)\s*)?[0-9]{6})(?!\w)",
     re.IGNORECASE,
 )
 _RULES = (
@@ -83,11 +86,16 @@ def _resolve(text: str, candidates: list[EntitySpan]) -> list[EntitySpan]:
         ),
     )
     accepted: list[EntitySpan] = []
+    starts: list[int] = []
     for span in ranked:
         check_spans(text, [span])
-        if not any(span.start < other.end and other.start < span.end for other in accepted):
-            accepted.append(span)
-    accepted.sort(key=lambda s: s.start)
+        position = bisect_left(starts, span.start)
+        if position and accepted[position - 1].end > span.start:
+            continue
+        if position < len(accepted) and accepted[position].start < span.end:
+            continue
+        starts.insert(position, span.start)
+        accepted.insert(position, span)
     check_spans(text, accepted)
     return accepted
 

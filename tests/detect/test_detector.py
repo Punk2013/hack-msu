@@ -1,5 +1,7 @@
 import json
 import socket
+import subprocess
+import sys
 from itertools import permutations
 from pathlib import Path
 
@@ -124,12 +126,62 @@ def test_repeats_and_namesakes_remain_separate_mentions():
     assert spans[0].start != spans[1].start
 
 
+@pytest.mark.parametrize(
+    "text,kind,raw",
+    [
+        ("Телефон: +7  (000)  000–00–01", PiiType.PHONE, "+7  (000)  000–00–01"),
+        ("8\t000\t000—00—02", PiiType.PHONE, "8\t000\t000—00—02"),
+        ("Телефон: 000‑000‑00‑03", PiiType.PHONE, "000‑000‑00‑03"),
+        ("Паспорт: 00 00 № 000004", PiiType.PASSPORT_RU, "00 00 № 000004"),
+        ("Паспорт РФ: серия 0000 номер 000005", PiiType.PASSPORT_RU, "0000 номер 000005"),
+    ],
+)
+def test_document_formatting_does_not_hide_identifiers(text, kind, raw):
+    spans = detect(text, CTX)
+    assert [(s.type, s.raw_text) for s in spans] == [(kind, raw)]
+
+
+def test_long_punctuation_does_not_trigger_quadratic_regex_scan():
+    # Separate process bounds a genuine regex regression; no tight CI stopwatch.
+    # Before the fix each possible '!' local-part start rescanned its suffix.
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from pii_gateway.detect.detector import _regex_spans; "
+            "assert _regex_spans('!' * 250_000) == []",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=5,
+    )
+
+
+def test_email_punctuation_local_part_is_preserved():
+    text = "Mail: !case+tag@example.test."
+    spans = detector._resolve(text, detector._regex_spans(text))
+    assert [s.raw_text for s in spans] == ["!case+tag@example.test"]
+
+
+def test_many_disjoint_spans_and_duplicate_candidates():
+    text = "Иван " * 5000
+    spans = [EntitySpan(i, i + 4, PiiType.PERSON, "Иван", "test") for i in range(0, len(text), 5)]
+    assert detector._resolve(text, list(reversed(spans)) + spans) == spans
+
+
 @pytest.mark.parametrize("text", ["", " \n\t", "🧪"])
 def test_empty_or_tokenless_input(text):
     assert detect(text, CTX) == []
 
 
-@pytest.mark.parametrize("filename", ["synthetic_v0.jsonl", "synthetic_v1.jsonl"])
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "synthetic_v0.jsonl",
+        "synthetic_v1.jsonl",
+        "synthetic_v2.jsonl",
+    ],
+)
 def test_corpus_annotations_and_live_output_contract(filename):
     seen = set()
     for line in (FIXTURES / filename).read_text().splitlines():
