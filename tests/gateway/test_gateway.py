@@ -237,7 +237,7 @@ def test_stream_blocked_tool_call_becomes_text(tmp_path):
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
 
 
-def test_stream_cut_never_splits_a_marker(tmp_path):
+def test_stream_buffers_text_until_choice_completion(tmp_path):
     from pii_gateway.gateway.policy import ToolPolicy
     from pii_gateway.gateway.stream import StreamRestorer
 
@@ -246,8 +246,9 @@ def test_stream_cut_never_splits_a_marker(tmp_path):
     events = []
     for piece in pieces:
         events += restorer.feed(_chunk({"content": piece}))
+    assert events == []  # no prefix escapes before complete alias is available
     events += restorer.feed(_chunk({}, "stop"))
     deltas = [json.loads(e[6:])["choices"][0]["delta"].get("content") or "" for e in events]
     assert all("[PERSO" not in d and "N_1]" not in d for d in deltas)
-    assert len([d for d in deltas if d]) > 1  # text was emitted before the end
+    assert len([d for d in deltas if d]) == 1
     assert "".join(deltas) == f"Письмо для {REAL} отправлено, копия {REAL} в архиве."

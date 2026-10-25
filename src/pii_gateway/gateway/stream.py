@@ -1,8 +1,8 @@
 """Streaming (SSE) response processing for Chat Completions.
 
-Text deltas are restored with a held-back tail so a marker or pseudonym split
-across chunks is never emitted half-restored. Tool call deltas are collected
-until the choice finishes, then passed through the tool policy as a whole.
+Text is buffered until choice completion: arbitrary-length aliases cannot be
+restored safely with a fixed tail. Tool calls are released only after an explicit
+tool_calls completion. EOF or DONE without completion discards pending output.
 """
 
 from __future__ import annotations
@@ -12,29 +12,18 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from pii_gateway.core.types import PiiGatewayError
 from pii_gateway.gateway.adapter import apply_tool_policy
 from pii_gateway.gateway.policy import ToolPolicy
 from pii_gateway.gateway.transform import Transformer
 
-
-def _safe_cut(pending: str, hold: int, t: Transformer) -> int:
-    """Largest whitespace cut that keeps `hold` chars back and splits no replacement."""
-    whole = t.restore(pending).text
-    cut = len(pending) - hold
-    while cut > 0:
-        cut = max(pending.rfind(" ", 0, cut), pending.rfind("\n", 0, cut))
-        if cut <= 0:
-            return 0
-        cut += 1  # keep the whitespace in the emitted part
-        if t.restore(pending[:cut]).text + t.restore(pending[cut:]).text == whole:
-            return cut
-        cut -= 1
-    return 0
+MAX_BUFFER_CHARS = 1_048_576
 
 
 @dataclass
 class _ChoiceState:
     pending: str = ""
+    buffered_chars: int = 0
     calls: dict[int, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -42,7 +31,7 @@ class StreamRestorer:
     def __init__(self, t: Transformer, policy: ToolPolicy, hold: int = 64) -> None:
         self.t = t
         self.policy = policy
-        self.hold = hold
+        _ = hold  # retained for source compatibility; fixed-tail emission is unsafe
         self.choices: dict[int, _ChoiceState] = {}
         self.template: dict[str, Any] = {}
 
@@ -59,7 +48,12 @@ class StreamRestorer:
         if state.pending:
             text = self.t.restore(state.pending).text
         calls = [state.calls[i] for i in sorted(state.calls)]
-        allowed, note = apply_tool_policy(calls, self.t, self.policy) if calls else ([], "")
+        allowed, note = [], ""
+        if calls:
+            if finish == "tool_calls":
+                allowed, note = apply_tool_policy(calls, self.t, self.policy)
+            else:
+                note = "\n[pii-gateway] incomplete tool calls discarded."
         text += note
         if text:
             out.append(self._chunk(index, {"content": text}))
@@ -82,6 +76,14 @@ class StreamRestorer:
             state = self.choices.setdefault(index, _ChoiceState())
             delta = dict(choice.get("delta") or {})
             text = delta.pop("content", None)
+            fragments = [text or ""]
+            for tc in delta.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                fragments.extend([fn.get("name") or "", fn.get("arguments") or ""])
+            state.buffered_chars += sum(len(part) for part in fragments)
+            if state.buffered_chars > MAX_BUFFER_CHARS:
+                self.choices.clear()
+                raise PiiGatewayError("stream choice exceeds local buffer limit")
             for tc in delta.pop("tool_calls", None) or []:
                 call = state.calls.setdefault(
                     tc.get("index", 0),
@@ -94,10 +96,6 @@ class StreamRestorer:
                 call["function"]["arguments"] += fn.get("arguments") or ""
             if text:
                 state.pending += text
-                cut = _safe_cut(state.pending, self.hold, self.t)
-                if cut:
-                    delta["content"] = self.t.restore(state.pending[:cut]).text
-                    state.pending = state.pending[cut:]
             if delta:  # role, reasoning_content, restored text
                 out.append(self._chunk(index, delta))
             finish = choice.get("finish_reason")
@@ -106,10 +104,9 @@ class StreamRestorer:
         return out
 
     def finish(self) -> list[str]:
-        out = []
-        for index in list(self.choices):
-            out.extend(self._flush(index, None))
-        return out
+        # Transport termination is not a choice completion. Never release calls.
+        self.choices.clear()
+        return []
 
 
 async def restore_sse(
