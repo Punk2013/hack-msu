@@ -96,7 +96,7 @@ def test_canary_never_reaches_upstream(tmp_path, body):
     with TestClient(
         create_app(Settings(workspace=tmp_path), T(), httpx.MockTransport(upstream))
     ) as client:
-        client.post("/v1/chat/completions", json=body)
+        assert client.post("/v1/chat/completions", json=body).status_code == 400
     assert all(REAL not in request for request in sent), "raw canary sent to upstream"
 
 
@@ -141,7 +141,8 @@ def test_incomplete_or_filtered_stream_never_releases_tool(tmp_path, ending):
     assert b'"tool_calls"' not in asyncio.run(collect()), "executable call released"
 
 
-def test_long_multiword_alias_is_never_split(tmp_path):
+@pytest.mark.parametrize("split", [1, 63, 64, 100, 198])
+def test_long_multiword_alias_is_never_split(tmp_path, split):
     fake = " ".join(["Псевдоним"] * 20)
 
     class LongAlias(T):
@@ -149,8 +150,8 @@ def test_long_multiword_alias_is_never_split(tmp_path):
             return RestoreResult(text.replace(fake, "ORIGINAL"), RestoreStatus.COMPLETE, [])
 
     restorer = StreamRestorer(LongAlias(), ToolPolicy(tmp_path, [tmp_path]))
-    events = restorer.feed(chunk({"content": fake[:100]}))
-    events += restorer.feed(chunk({"content": fake[100:]}))
+    events = restorer.feed(chunk({"content": fake[:split]}))
+    events += restorer.feed(chunk({"content": fake[split:]}))
     events += restorer.feed(chunk({}, "stop"))
     result = "".join(json.loads(e[6:])["choices"][0]["delta"].get("content", "") for e in events)
     assert result == "ORIGINAL"
@@ -185,3 +186,119 @@ def test_positive_control_completed_tool_call_is_released(tmp_path):
     ]
     assert len(calls) == 1
     assert calls[0]["function"]["name"] == "write_file"
+
+
+@pytest.mark.parametrize("ending", [None, "stop", "length", "content_filter"])
+def test_nonstream_incomplete_tool_is_discarded(tmp_path, ending):
+    from pii_gateway.gateway.adapter import restore_response
+
+    reply = {"choices": [{"finish_reason": ending, "message": tool_delta()}]}
+    restored = restore_response(reply, T(), ToolPolicy(tmp_path, [tmp_path]))
+    assert "tool_calls" not in restored["choices"][0]["message"]
+
+
+@pytest.mark.parametrize("field", ["model", "stop", "temperature", "seed", "stream"])
+def test_canary_in_control_fields_is_refused(tmp_path, field):
+    sent = []
+
+    def upstream(request):
+        sent.append(request)
+        return httpx.Response(200, json={"choices": []})
+
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}], field: REAL}
+    with TestClient(
+        create_app(Settings(workspace=tmp_path), T(), httpx.MockTransport(upstream))
+    ) as c:
+        assert c.post("/v1/chat/completions", json=body).status_code == 400
+    assert sent == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],
+        None,
+        {"model": "m", "messages": [None]},
+        {"model": "m", "messages": [{"role": [], "content": "hi"}]},
+        {"model": "m", "messages": [], "tools": {}},
+        {"model": "m", "messages": [], "stream_options": {"include_usage": REAL}},
+        {
+            "model": "m",
+            "messages": [],
+            "tool_choice": {"type": "function", "function": {"name": REAL}},
+        },
+    ],
+)
+def test_malformed_envelopes_fail_closed(body):
+    from pii_gateway.gateway.adapter import UnsupportedRequest, mask_request
+
+    with pytest.raises(UnsupportedRequest):
+        mask_request(body, T())
+
+
+def test_supported_controls_and_tool_history_survive():
+    from pii_gateway.gateway.adapter import mask_request
+
+    body = {
+        "model": "m",
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_tokens": 100,
+        "n": 1,
+        "stop": ["END"],
+        "parallel_tool_calls": False,
+        "tool_choice": {"type": "function", "function": {"name": "write_file"}},
+        "messages": [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call1",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": json.dumps({"content": REAL}),
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call1", "content": REAL},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "strict": True,
+                    "description": REAL,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"content": {"type": "string", "description": REAL}},
+                        "required": ["content"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ],
+    }
+    masked = mask_request(body, T())
+    assert REAL not in json.dumps(masked)
+    assert masked["tool_choice"] == body["tool_choice"]
+    assert masked["stream_options"] == body["stream_options"]
+    assert masked["tools"][0]["function"]["parameters"]["required"] == ["content"]
+    assert masked["messages"][0]["tool_calls"][0]["id"] == "call1"
+    assert masked["messages"][1]["content"] == "[EMAIL_1]"
+    assert REAL in body["messages"][1]["content"]  # input is not mutated
+
+
+def test_stream_buffer_limit_releases_no_pending_calls(tmp_path):
+    from pii_gateway.gateway.stream import MAX_BUFFER_CHARS
+
+    restorer = StreamRestorer(T(), ToolPolicy(tmp_path, [tmp_path]))
+    assert restorer.feed(chunk(tool_delta())) == []
+    with pytest.raises(PiiGatewayError, match="buffer limit"):
+        restorer.feed(chunk({"content": "x" * (MAX_BUFFER_CHARS + 1)}))
+    assert restorer.finish() == []
