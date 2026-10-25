@@ -132,3 +132,15 @@ def test_odd_person_span_falls_back_to_marker_instead_of_failing(raw):
     result = mask(text, spans_for(text, (raw, PiiType.PERSON)), ctx)
     assert raw not in result.text
     assert restore(result.text, ctx).text == text
+
+
+def test_name_and_patronymic_without_surname_link_and_restore():
+    ctx = Context("given")
+    card = "ФИО: Анна Сергеевна Смирнова. Анне Сергеевне нужно напомнить об оплате."
+    spans = spans_for(card, ("Анна Сергеевна Смирнова", PiiType.PERSON),
+                      ("Анне Сергеевне", PiiType.PERSON))
+    result = mask(card, spans, ctx)
+    assert result.replacements[0].entity_id == result.replacements[1].entity_id
+    first, patr, _ = result.text.removeprefix("ФИО: ").split(".")[0].split()
+    assert result.text.split(". ")[1].startswith(first[:-1])  # same fake given name, declined
+    assert restore(f"Уважаемая {first} {patr}!", ctx).text == "Уважаемая Анна Сергеевна!"
