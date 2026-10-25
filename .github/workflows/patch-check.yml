@@ -1,5 +1,6 @@
 name: Patch checks
 on:
+  pull_request:
   push:
     branches: [main]
 permissions:
@@ -14,10 +15,13 @@ jobs:
           persist-credentials: false
       - name: Check patch whitespace
         env:
-          BASE_SHA: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --check "$BASE_SHA...$HEAD_SHA"
+          elif [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
             git show --format= --check "$HEAD_SHA"
           else
             git diff --check "$BASE_SHA" "$HEAD_SHA"
