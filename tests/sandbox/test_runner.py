@@ -143,28 +143,6 @@ def test_command_drops_host_environment_and_all_network_namespaces(config, tmp_p
     assert "--ro-bind" in args
 
 
-@pytest.fixture
-def working_sandbox(config):
-    if sys.platform != "linux" or not shutil.which("bwrap"):
-        pytest.skip("Linux with bubblewrap required; isolation was not tested")
-    try:
-        result = run_sandbox(config, ["/usr/bin/true"], capture_output=True, timeout=15)
-    except OSError as exc:
-        pytest.skip(f"sandbox unavailable in this execution environment: {exc.errno}")
-    if result.returncode:
-        if any(
-            message in result.stderr
-            for message in (
-                "Operation not permitted",
-                "No permissions to create",
-                "not allowed",
-            )
-        ):
-            pytest.skip("kernel namespace restrictions prevent bubblewrap; isolation NOT tested")
-        pytest.fail(f"sandbox preflight failed unexpectedly: {result.stderr}")
-    return config
-
-
 def test_real_namespace_blocks_child_egress_vault_symlinks_and_host_credentials(
     working_sandbox,
     tmp_path,

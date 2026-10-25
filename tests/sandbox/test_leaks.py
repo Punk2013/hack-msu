@@ -58,6 +58,21 @@ def test_positive_control_and_sanitized_request_are_distinguished():
         assert spy.report()["requests"] == 2
 
 
+@pytest.mark.parametrize("content,verdict", [(REAL, "leak"), ("masked", "inconclusive")])
+def test_broken_scripted_provider_cannot_hide_a_received_request(content, verdict):
+    def broken(body):
+        raise RuntimeError("synthetic responder failed")
+
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)]), responder=broken) as spy:
+        response = httpx.post(
+            spy.base_url + "/chat/completions", json={"content": content}, trust_env=False
+        )
+        assert response.status_code == 500
+        assert spy.report()["requests"] == 1
+        assert spy.report()["unexpected_requests"] == 1
+        assert spy.report()["verdict"] == verdict
+
+
 def test_repository_manifest_contains_four_synthetic_types():
     path = Path(__file__).parents[2] / "bench/fixtures/synthetic_canaries.json"
     assert len(load_canaries(path)) == 4
