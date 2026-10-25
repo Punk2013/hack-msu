@@ -27,3 +27,4 @@ dumps/
 
 # Demo output (generated)
 demo/out/
+demo/.run/
