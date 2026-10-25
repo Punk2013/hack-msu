@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "cases": [
+    {"file": "01_card.txt", "sensitive": ["Алексей Дмитриевич Соколов", "alexey.sokolov@example.test", "+7 900 111-22-33", "00 11 123456"]},
+    {"file": "02_cases.txt", "sensitive": ["Анна Сергеевна Смирнова", "Анне Сергеевне Смирновой", "Анной Сергеевной Смирновой", "Анне Сергеевне", "anna.meeting@example.test"]},
+    {"file": "03_same_surname.txt", "sensitive": ["Иван Петрович Иванов", "Пётр Александрович Иванов", "ivan.buyer@example.test", "petr.seller@example.test"]},
+    {"file": "04_formats.txt", "sensitive": ["Мария Викторовна Кузнецова", "8 (900) 222-33-44", "MARIA.KUZNETSOVA@example.test", "0012 654321"]},
+    {"file": "05_limits.txt", "sensitive": ["И. П. Иванов", "@synthetic_client_482", "город Примерск, улица Тестовая, дом 99", "02.03.1991", "000-000-000 00"], "known_limits": true},
+    {"file": "06_reserved_marker.txt", "sensitive": ["literal.marker@example.test"], "expect_refusal": true},
+    {"file": "07_plain.txt", "sensitive": []}
+  ]
+}
