@@ -195,7 +195,75 @@ class Vault:
             conn.execute("DELETE FROM markers;")
             conn.execute("DELETE FROM mentions;")
             conn.execute("DELETE FROM surfaces;")
+            conn.execute("DELETE FROM pairs;")
+            conn.execute("DELETE FROM entity_keys;")
             conn.execute("DELETE FROM entities;")
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return comprehensive metrics and statistics for this project vault."""
+        conn = self._get_connection()
+        size_bytes = self.db_path.stat().st_size if self.db_path.exists() else 0
+
+        rows = conn.execute(
+            "SELECT pii_type, count(*), sum(is_ambiguous) FROM entities GROUP BY pii_type"
+        ).fetchall()
+        entities_by_type: dict[str, int] = {}
+        total_ambiguous = 0
+        total_entities = 0
+        for row in rows:
+            p_type, count, amb = str(row[0]), int(row[1]), int(row[2] or 0)
+            entities_by_type[p_type] = count
+            total_entities += count
+            total_ambiguous += amb
+
+        total_surfaces = int(conn.execute("SELECT count(*) FROM surfaces").fetchone()[0])
+        total_markers = int(conn.execute("SELECT count(*) FROM markers").fetchone()[0])
+        total_pairs = int(conn.execute("SELECT count(*) FROM pairs").fetchone()[0])
+        total_keys = int(conn.execute("SELECT count(*) FROM entity_keys").fetchone()[0])
+        total_audit = int(conn.execute("SELECT count(*) FROM audit").fetchone()[0])
+
+        return {
+            "project_id": self.project_id,
+            "db_path": str(self.db_path),
+            "db_size_bytes": size_bytes,
+            "total_entities": total_entities,
+            "entities_by_type": entities_by_type,
+            "ambiguous_entities": total_ambiguous,
+            "total_surfaces": total_surfaces,
+            "total_markers": total_markers,
+            "total_pairs": total_pairs,
+            "total_keys": total_keys,
+            "total_audit_events": total_audit,
+        }
+
+    def list_entities(self) -> list[dict[str, Any]]:
+        """List entities stored in this vault with surface and marker summaries."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            """
+            SELECT e.entity_id, e.pii_type, e.is_ambiguous, e.created_at,
+                   (SELECT marker_text FROM markers m
+                    WHERE m.entity_id = e.entity_id LIMIT 1) as marker,
+                   (SELECT count(*) FROM surfaces s
+                    WHERE s.entity_id = e.entity_id) as surface_count,
+                   (SELECT count(*) FROM pairs p
+                    WHERE p.entity_id = e.entity_id) as pair_count
+            FROM entities e
+            ORDER BY e.created_at ASC
+            """
+        ).fetchall()
+        return [
+            {
+                "entity_id": str(r["entity_id"]),
+                "pii_type": str(r["pii_type"]),
+                "is_ambiguous": bool(r["is_ambiguous"]),
+                "created_at": float(r["created_at"]),
+                "marker": str(r["marker"]) if r["marker"] else None,
+                "surface_count": int(r["surface_count"]),
+                "pair_count": int(r["pair_count"]),
+            }
+            for r in rows
+        ]
 
     def get_next_marker_index(self, pii_type: str | PiiType) -> int:
         """Atomically increment and return the next marker index for pii_type."""
