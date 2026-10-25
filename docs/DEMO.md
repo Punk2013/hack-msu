@@ -57,11 +57,13 @@ SANDBOX=1 scripts/demo.sh qwen2.5:7b
    ```bash
    PII_VAULT_DIR=/tmp/pii-gateway-demo.XXXXXX/vault .venv/bin/python -m pii_gateway.vault stats demo
    ```
-4. **Проверка на утечки**: ни одно значение из карточек не встречается в исходящих запросах.
+4. **Проверка на утечки**: все поля карточек (ФИО, email, телефон, паспорт) и падежные формы
+   фамилий ищутся в исходящих запросах. Код выхода: 0 — не найдено, 1 — утечка, 2 — нечего проверять.
    ```bash
-   grep -rlwE 'Иванов|Смирнова|ivan\.ivanov|anna\.smirnova|900 000-00-0' \
-     /tmp/pii-gateway-demo.XXXXXX/dumps/ || echo "утечек нет"
+   scripts/check_leaks.py /tmp/pii-gateway-demo.XXXXXX/dumps
    ```
+   Это проверка конкретного списка значений, а не доказательство отсутствия любых утечек.
+   Независимая проверка на уровне HTTP — стенд из `bench/README.md`.
 5. **Fail-closed и сеть** — автоматические проверки (≈1 минута):
    ```bash
    .venv/bin/pytest -q tests/integration tests/sandbox/test_full_gate.py

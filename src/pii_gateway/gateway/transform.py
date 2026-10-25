@@ -82,9 +82,18 @@ def _with_known_originals(text: str, spans: list[EntitySpan], ctx: Context) -> l
         return spans
     kinds = dict(known)
     alternation = "|".join(re.escape(o) for o in sorted(kinds, key=len, reverse=True))
-    extra = [
-        EntitySpan(m.start(), m.end(), PiiType(kinds[m.group(0)]), m.group(0), "vault:known@1")
-        for m in re.finditer(rf"(?<!\w)(?:{alternation})(?!\w)", text)
-        if not any(m.start() < s.end and s.start < m.end() for s in spans)
-    ]
-    return sorted([*spans, *extra], key=lambda s: s.start)
+    result = list(spans)
+    for m in re.finditer(rf"(?<!\w)(?:{alternation})(?!\w)", text):
+        start, end = m.start(), m.end()
+        overlapping = [s for s in result if s.start < end and start < s.end]
+        if overlapping and all(s.start <= start and end <= s.end for s in overlapping):
+            continue  # already fully covered by a detected span
+        # a detector span that covers only part of a known value ("Иван Петрович" of
+        # "Иван Петрович Иванов") must not leave the rest open: cover the union
+        start = min([start, *(s.start for s in overlapping)])
+        end = max([end, *(s.end for s in overlapping)])
+        result = [s for s in result if s not in overlapping]
+        result.append(
+            EntitySpan(start, end, PiiType(kinds[m.group(0)]), text[start:end], "vault:known@1")
+        )
+    return sorted(result, key=lambda s: s.start)

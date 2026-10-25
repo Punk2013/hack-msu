@@ -37,3 +37,19 @@ def test_short_originals_are_not_masked_everywhere():
     pipeline.mask(CARD)
     text = "Статус: ок, до 01.12.2026."
     assert pipeline.mask(text) == text
+
+
+def test_detector_span_covering_part_of_known_value_does_not_leave_rest_open(monkeypatch):
+    # review of #47: detector returned only "Иван Петрович" of a stored full name
+    from pii_gateway.core.types import EntitySpan, PiiType
+
+    pipeline = CorePipeline(Context("partial-overlap", "marker"))
+    full = "Иван Петрович Иванов"
+    pipeline.mask(f"ФИО: {full}.")
+    monkeypatch.setattr(
+        "pii_gateway.detect.detect",
+        lambda text, ctx: [EntitySpan(0, 13, PiiType.PERSON, "Иван Петрович", "test")],
+    )
+    outbound = pipeline.mask(full)
+    assert "Иванов" not in outbound and "Иван" not in outbound
+    assert pipeline.restore(outbound).text == full
