@@ -1,0 +1,50 @@
+{
+  "corpus": "synthetic_v1.jsonl",
+  "sha256": "8cf3590db71f856d2a54112550d9822d18834fd7ac71d8f6288e5ba90e34f611",
+  "records": 23,
+  "metric": "exact (start, end, type), micro per type",
+  "python": "3.12.14",
+  "machine": "arm64",
+  "model": "natasha==1.6.0 / NewsNERTagger",
+  "counts": {
+    "PERSON": {
+      "tp": 9,
+      "fp": 3,
+      "fn": 4,
+      "precision": 0.75,
+      "recall": 0.6923076923076923
+    },
+    "EMAIL": {
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "PHONE": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "PASSPORT_RU": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0
+    }
+  },
+  "mismatch_case_ids": [
+    "initials",
+    "lowercase",
+    "latin",
+    "typo",
+    "negative_org"
+  ],
+  "cold_init_and_inference_ms": 225.74,
+  "warm_median_ms": 0.33,
+  "warm_max_ms": 0.74,
+  "limitation": "Small development corpus, not a held-out or privacy guarantee"
+}

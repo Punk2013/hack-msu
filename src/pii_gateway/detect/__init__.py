@@ -1,8 +1,5 @@
-"""PII detection (role 2, issue #10)."""
+"""Local PII detection. No network requests or silent regex-only fallback."""
 
-from pii_gateway.core.types import Context, EntitySpan
+from pii_gateway.detect.detector import detect
 
-
-def detect(text: str, ctx: Context) -> list[EntitySpan]:
-    """Return sorted, non-overlapping spans. Raise DetectError on failure."""
-    raise NotImplementedError
+__all__ = ["detect"]
