@@ -71,7 +71,18 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/ruff check          # линтер
 ```
 
-Запуск gateway и демо появятся в задаче #9; команды будут добавлены сюда.
+Запуск gateway (OpenAI-совместимый endpoint на `http://127.0.0.1:8787/v1`):
+
+```bash
+PII_UPSTREAM_BASE_URL=http://localhost:11434/v1 \
+PII_WORKSPACE=./demo PII_WRITE_ROOTS=./demo/out \
+.venv/bin/uvicorn pii_gateway.gateway.app:app --host 127.0.0.1 --port 8787
+```
+
+Переменные: `PII_UPSTREAM_API_KEY` (ключ провайдера, хранится только у gateway),
+`PII_LOCAL_TOKEN` (токен, который агент передаёт gateway), `PII_PROJECT_ID`, `PII_MODE=marker|realistic`,
+`PII_PASSTHROUGH=1` (Gate 0: без изменений), `PII_DUMP_DIR` (полные дампы, **только синтетика**).
+Клиент: указать `base_url` = `http://127.0.0.1:8787/v1`.
 CI запускает пробельную проверку, ruff и pytest.
 
 ## Контракты
