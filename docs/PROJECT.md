@@ -84,7 +84,7 @@ PII_WORKSPACE=./demo PII_WRITE_ROOTS=./demo/out \
 `PII_PASSTHROUGH=1` (Gate 0: без изменений), `PII_DUMP_DIR` (полные дампы, **только синтетика**).
 Клиент: указать `base_url` = `http://127.0.0.1:8787/v1`.
 
-Демо одной командой (gateway + `demo_agent` + отчёт «что видел провайдер»):
+Демо одной командой (gateway + `demo_agent` + отчёт «что видел провайдер»), подробная инструкция — [DEMO.md](DEMO.md):
 
 ```bash
 scripts/demo.sh qwen2.5:7b
