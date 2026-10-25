@@ -330,7 +330,9 @@ def _marker(vault: Vault, kind: PiiType, entity_id: str, raw: str) -> str:
     return marker
 
 
-def _replace_one(vault: Vault, span: EntitySpan, ctx: Context) -> tuple[str, Replacement]:
+def _replace_one(
+    vault: Vault, span: EntitySpan, ctx: Context, link_to: str | None = None
+) -> tuple[str, Replacement]:
     raw, kind = span.raw_text, span.type
     name = _analyze_name(raw) if kind is PiiType.PERSON else None
     if name is not None:
@@ -346,7 +348,10 @@ def _replace_one(vault: Vault, span: EntitySpan, ctx: Context) -> tuple[str, Rep
     else:
         is_partial = False
         keys = [f"{kind}|{_normalize(kind, raw)}"]
-    entity_id, linked_by = _resolve_entity(vault, kind, keys, is_partial=is_partial)
+    if link_to is not None:
+        entity_id, linked_by = link_to, "partial_single"
+    else:
+        entity_id, linked_by = _resolve_entity(vault, kind, keys, is_partial=is_partial)
     rep = Replacement(span.start, span.end, entity_id, linked_by, name.case if name else None)
 
     if ctx.mode == "realistic":
@@ -368,6 +373,46 @@ def _replace_one(vault: Vault, span: EntitySpan, ctx: Context) -> tuple[str, Rep
     return _marker(vault, kind, entity_id, raw), rep
 
 
+def _first_name(span: EntitySpan) -> tuple[_Name, str] | None:
+    """(analysis, name lemma) for a PERSON mention that contains a first name."""
+    if span.type is not PiiType.PERSON:
+        return None
+    name = _analyze_name(span.raw_text)
+    if name is None:
+        return None
+    lemma = next((t.normal for t in name.tokens if t.role == "Name"), None)
+    return (name, lemma) if lemma else None
+
+
+def _plan(vault: Vault, spans: list[EntitySpan], ctx: Context) -> list[tuple[str, Replacement]]:
+    """Replace longer mentions first, then link a bare first name to them (issue #48).
+
+    Scope is the text being masked (one message or tool result), never the whole vault:
+    "Игорь" joins "Игорь Олегович" only if exactly one such person is in this text.
+    """
+    names = {i: _first_name(span) for i, span in enumerate(spans)}
+    bare = {
+        i for i, info in names.items() if info is not None and len(info[0].tokens) == 1
+    }
+    planned: dict[int, tuple[str, Replacement]] = {}
+    for i, span in enumerate(spans):
+        if i not in bare:
+            planned[i] = _replace_one(vault, span, ctx)
+    for i in sorted(bare):
+        name, lemma = names[i]
+        owners = {
+            planned[j][1].entity_id
+            for j, info in names.items()
+            if j not in bare
+            and info is not None
+            and info[1] == lemma
+            and info[0].gender == name.gender
+        }
+        link = owners.pop() if len(owners) == 1 else None
+        planned[i] = _replace_one(vault, spans[i], ctx, link_to=link)
+    return [planned[i] for i in range(len(spans))]
+
+
 def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
     check_spans(text, spans)
     if RESERVED_MARKER_PREFIX.search(text):
@@ -376,7 +421,7 @@ def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
         return MaskResult(text=text, replacements=[])
     try:
         with Vault(ctx.project_id) as vault:
-            planned = [_replace_one(vault, span, ctx) for span in spans]
+            planned = _plan(vault, spans, ctx)
     except MaskError:
         raise
     except Exception as exc:  # never leak input text through third-party errors
