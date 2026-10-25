@@ -1,13 +1,12 @@
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from pii_gateway.gateway.adapter import mask_request
 from pii_gateway.gateway.journal import Journal
 from pii_gateway.gateway.transform import PassThrough
 from pii_gateway.journal_report import build
-
 
 SNAPSHOT = Path(__file__).parents[2]
 
