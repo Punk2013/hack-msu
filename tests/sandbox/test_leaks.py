@@ -1,4 +1,6 @@
 import json
+import socket
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -59,3 +61,107 @@ def test_positive_control_and_sanitized_request_are_distinguished():
 def test_repository_manifest_contains_four_synthetic_types():
     path = Path(__file__).parents[2] / "bench/fixtures/synthetic_canaries.json"
     assert len(load_canaries(path)) == 4
+
+
+def test_wrong_path_body_is_still_inspected():
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)])) as spy:
+        response = httpx.post(spy.base_url + "/wrong-path", json={"content": REAL}, trust_env=False)
+        assert response.status_code == 404
+        assert spy.report()["requests"] == 1
+        assert spy.report()["requests_with_canaries"] == 1
+        assert spy.report()["body_bytes"] > 0
+
+
+@pytest.mark.parametrize("method", ["GET", "BREW"])
+def test_unsupported_method_url_and_headers_are_observed(method):
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)])) as spy:
+        response = httpx.request(
+            method,
+            spy.base_url + "/chat/completions?q=" + quote(REAL),
+            headers={"X-Canary": quote(REAL)},
+            trust_env=False,
+        )
+        assert response.status_code >= 400
+        assert spy.report()["requests"] == 1
+        assert spy.report()["canary_ids"] == ["client"]
+
+
+def test_get_with_framed_body_does_not_hide_received_bytes():
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)])) as spy:
+        response = httpx.request(
+            "GET",
+            spy.base_url + "/chat/completions",
+            content=json.dumps({"content": REAL}).encode(),
+            trust_env=False,
+        )
+        assert response.status_code >= 400
+        assert spy.report()["requests_with_canaries"] == 1
+        assert spy.report()["body_bytes"] > 0
+
+
+@pytest.mark.parametrize(
+    "framing",
+    [
+        b"Transfer-Encoding: chunked\r\n",
+        b"Content-Length: 1\r\nContent-Length: 2\r\n",
+        b"Content-Length: 5000000\r\n",
+        b"",  # POST with no supported body framing
+    ],
+)
+def test_unscanned_framing_is_inconclusive_not_clean(framing):
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)])) as spy:
+        port = spy.server.server_port
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as peer:
+            peer.sendall(
+                b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
+                + framing
+                + b"Connection: close\r\n\r\n"
+            )
+            assert b"400" in peer.recv(4096)
+        report = spy.report()
+        assert report["requests"] == 1
+        assert report["unscanned_requests"] == 1
+        assert report["verdict"] == "inconclusive"
+
+
+def test_unsupported_clean_request_cannot_make_a_clean_report():
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)])) as spy:
+        assert spy.report()["verdict"] == "no_requests"
+        httpx.get(spy.base_url + "/wrong-path", trust_env=False)
+        assert spy.report()["requests"] == 1
+        assert spy.report()["unexpected_requests"] == 1
+        assert spy.report()["verdict"] == "inconclusive"
+
+
+def test_truncated_body_is_scanned_and_marked_incomplete():
+    value = "SYNTHETIC_REVIEW_4501123456"
+    body = value.encode()
+    with UpstreamSpy(LeakScanner([Canary("client", value)])) as spy:
+        with socket.create_connection(("127.0.0.1", spy.server.server_port), timeout=2) as peer:
+            peer.sendall(
+                b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
+                + f"Content-Length: {len(body) + 10}\r\n\r\n".encode()
+                + body
+            )
+            peer.shutdown(socket.SHUT_WR)
+            assert b"400" in peer.recv(4096)
+        report = spy.report()
+        assert report["requests"] == 1
+        assert report["unscanned_requests"] == 1
+        assert report["canary_ids"] == ["client"]
+        assert report["verdict"] == "leak"
+
+
+def test_inflight_body_cannot_make_a_clean_or_zero_request_report():
+    with UpstreamSpy(LeakScanner([Canary("client", REAL)])) as spy:
+        with socket.create_connection(("127.0.0.1", spy.server.server_port), timeout=2) as peer:
+            peer.sendall(
+                b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
+                b"Content-Length: 100\r\n\r\n"
+            )
+            deadline = time.monotonic() + 2
+            while spy.report()["requests"] == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            report = spy.report()
+            assert report["requests"] == report["inflight_requests"] == 1
+            assert report["verdict"] == "inconclusive"

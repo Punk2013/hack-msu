@@ -2,6 +2,7 @@ import json
 import shutil
 import socket
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -25,11 +26,26 @@ from pii_gateway.sandbox.upstream_spy import UpstreamSpy
 
 @pytest.fixture
 def config(tmp_path):
-    work = tmp_path / "workspace"
-    work.mkdir()
-    output = work / "out"
-    output.mkdir()
-    return SandboxConfig(work, output)
+    # macOS TMPDIR can exceed the pathname length supported by UNIX sockets.
+    directory = "/tmp" if Path("/tmp").is_dir() else tmp_path
+    with tempfile.TemporaryDirectory(prefix="pii-sb-", dir=directory) as root:
+        work = Path(root) / "workspace"
+        work.mkdir()
+        output = work / "out"
+        output.mkdir()
+        yield SandboxConfig(work, output)
+
+
+@pytest.fixture
+def linux_profile(monkeypatch):
+    """Pure profile tests simulate Linux; real execution keeps the real OS guard."""
+    monkeypatch.setattr(sys, "platform", "linux")
+
+
+def test_non_linux_is_refused_before_launch(config, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    with pytest.raises(SandboxError, match="Linux only"):
+        config.validate()
 
 
 @pytest.mark.parametrize("host", ["localhost", "0.0.0.0", "192.0.2.1", "*"])
@@ -38,6 +54,7 @@ def test_gateway_has_one_numeric_loopback_target(host):
         GatewayAddress(host, 8787).validate()
 
 
+@pytest.mark.usefixtures("linux_profile")
 def test_export_symlink_outside_workspace_is_refused(config, tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -47,6 +64,7 @@ def test_export_symlink_outside_workspace_is_refused(config, tmp_path):
         SandboxConfig(config.workspace, link).validate()
 
 
+@pytest.mark.usefixtures("linux_profile")
 def test_protected_file_cannot_be_inside_export(config):
     with pytest.raises(SandboxError, match="protected"):
         SandboxConfig(
@@ -54,6 +72,7 @@ def test_protected_file_cannot_be_inside_export(config):
         ).validate()
 
 
+@pytest.mark.usefixtures("linux_profile")
 def test_host_unix_socket_inside_workspace_is_refused(config):
     with socket.socket(socket.AF_UNIX) as peer:
         peer.bind(str(config.workspace / "host-service.sock"))
@@ -61,20 +80,23 @@ def test_host_unix_socket_inside_workspace_is_refused(config):
             config.validate()
 
 
-def test_hard_link_to_host_file_is_refused(config, tmp_path):
-    secret = tmp_path / "secret"
+@pytest.mark.usefixtures("linux_profile")
+def test_hard_link_to_host_file_is_refused(config):
+    secret = config.workspace.parent / "secret"
     secret.write_text("synthetic secret")
     (config.workspace / "alias").hardlink_to(secret)
     with pytest.raises(SandboxError, match="hard links"):
         config.validate()
 
 
+@pytest.mark.usefixtures("linux_profile")
 def test_no_bubblewrap_means_no_unprotected_fallback(config, tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     with pytest.raises(SandboxError, match="not started"):
         build_command(config, tmp_path, ["/usr/bin/true"])
 
 
+@pytest.mark.usefixtures("linux_profile")
 def test_command_drops_host_environment_and_all_network_namespaces(config, tmp_path, monkeypatch):
     # Command construction is portable; real execution is tested separately.
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/bwrap")
