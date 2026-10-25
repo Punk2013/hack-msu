@@ -73,6 +73,40 @@ def test_protected_file_cannot_be_inside_export(config):
 
 
 @pytest.mark.usefixtures("linux_profile")
+@pytest.mark.parametrize("path_kind", ["absolute", "relative", "symlink"])
+@pytest.mark.parametrize("export_kind", ["workspace", "runtime"])
+def test_configured_vault_cannot_be_exported(config, monkeypatch, path_kind, export_kind):
+    exported = config.workspace
+    runtimes = ()
+    if export_kind == "runtime":
+        exported = config.workspace.parent / "runtime"
+        exported.mkdir()
+        runtimes = (exported,)
+    vault = exported / "private-vault"
+    # Even a not-yet-created vault must be protected before its first write.
+    configured = str(vault)
+    if path_kind == "relative":
+        monkeypatch.chdir(exported.parent)
+        configured = str(vault.relative_to(exported.parent))
+    elif path_kind == "symlink":
+        link = config.workspace.parent / "vault-link"
+        link.symlink_to(vault, target_is_directory=True)
+        configured = str(link)
+    monkeypatch.setenv("PII_VAULT_DIR", configured)
+    with pytest.raises(SandboxError, match="protected"):
+        SandboxConfig(config.workspace, config.write_root, runtime_roots=runtimes).validate()
+    assert not vault.exists()
+
+
+@pytest.mark.usefixtures("linux_profile")
+def test_configured_vault_outside_export_is_allowed(config, monkeypatch):
+    vault = config.workspace.parent / "private-vault"
+    monkeypatch.setenv("PII_VAULT_DIR", str(vault))
+    config.validate()
+    assert not vault.exists()
+
+
+@pytest.mark.usefixtures("linux_profile")
 def test_host_unix_socket_inside_workspace_is_refused(config):
     with socket.socket(socket.AF_UNIX) as peer:
         peer.bind(str(config.workspace / "host-service.sock"))
@@ -107,28 +141,6 @@ def test_command_drops_host_environment_and_all_network_namespaces(config, tmp_p
     assert "--new-session" in args
     assert "PII_UPSTREAM_API_KEY" not in args
     assert "--ro-bind" in args
-
-
-@pytest.fixture
-def working_sandbox(config):
-    if sys.platform != "linux" or not shutil.which("bwrap"):
-        pytest.skip("Linux with bubblewrap required; isolation was not tested")
-    try:
-        result = run_sandbox(config, ["/usr/bin/true"], capture_output=True, timeout=15)
-    except OSError as exc:
-        pytest.skip(f"sandbox unavailable in this execution environment: {exc.errno}")
-    if result.returncode:
-        if any(
-            message in result.stderr
-            for message in (
-                "Operation not permitted",
-                "No permissions to create",
-                "not allowed",
-            )
-        ):
-            pytest.skip("kernel namespace restrictions prevent bubblewrap; isolation NOT tested")
-        pytest.fail(f"sandbox preflight failed unexpectedly: {result.stderr}")
-    return config
 
 
 def test_real_namespace_blocks_child_egress_vault_symlinks_and_host_credentials(
