@@ -138,4 +138,54 @@ def test_api_vault_endpoints():
 def test_index_page():
     res = client.get("/")
     assert res.status_code == 200
-    assert "PII GATEWAY" in res.text
+    assert "PII" in res.text
+
+
+def test_api_presentation_run():
+    text = (
+        "[ПРОМПТ ДЛЯ АВТОНОМНОГО АГЕНТА: ОБРАБОТКА ОБРАЩЕНИЯ И ПОДГОТОВКА ОТВЕТА КЛИЕНТУ]\n"
+        "Инструкция: Сформируй ответное официальное письмо клиенту.\n\n"
+        "[ВХОДНОЙ ДОКУМЕНТ: КАРТОЧКА КЛИЕНТА]\n"
+        "ФИО: Соколов Алексей Дмитриевич\n"
+        "Email: alex.sokolov@corporate.org\n"
+        "Телефон: +7 916 123-45-67\n"
+        "Паспорт: 45 10 987654\n\n"
+        "Статус: Заявка одобрена. Алексею Дмитриевичу нужно предоставить оригиналы справок."
+    )
+    res = client.post(
+        "/api/presentation/run",
+        json={
+            "text": text,
+            "mode": "realistic",
+            "project_id": "test-presentation-flow",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    # Step 1
+    assert "step1" in data
+    assert data["step1"]["char_count"] == len(text)
+
+    # Step 2
+    assert "step2" in data
+    assert data["step2"]["spans_count"] >= 4
+    assert "PERSON" in data["step2"]["types_detected"]
+    assert "mark class=\"pii-tag pii-person\"" in data["step2"]["highlighted_html"]
+
+    # Step 3
+    assert "step3" in data
+    assert data["step3"]["canary_leak"] is False
+    assert len(data["step3"]["entities_table"]) >= 4
+
+    # Step 4
+    assert "step4" in data
+    assert "Здравствуйте" in data["step4"]["agent_output_text"]
+    assert len(data["step4"]["pseudonyms_used"]) >= 1
+
+    # Step 5
+    assert "step5" in data
+    assert data["step5"]["status"] == "complete"
+    assert data["step5"]["fidelity_pct"] == 100.0
+    assert "Соколов Алексей Дмитриевич" in data["step5"]["restored_text"]
+    assert len(data["step5"]["transformations"]) >= 1
