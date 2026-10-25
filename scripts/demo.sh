@@ -28,13 +28,16 @@ for _ in $(seq 80); do
   sleep 0.25
 done
 if [ "$ready" != 1 ]; then echo "Gateway не готов; лог: $RUN/gateway.log" >&2; exit 1; fi
+# provider credentials stay with the gateway: the agent process never inherits them
+AGENT_ENV=(env -u PII_UPSTREAM_API_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY
+           -u DEEPSEEK_API_KEY -u ANTHROPIC_API_KEY)
 AGENT_ARGS=(--stream --base-url http://127.0.0.1:8787/v1 --model "$MODEL" --workspace "$WORKSPACE")
 if [ "${SANDBOX:-0}" = 1 ]; then
-  .venv/bin/python -m pii_gateway.sandbox --workspace "$WORKSPACE" --write-root "$WORKSPACE/out" \
+  "${AGENT_ENV[@]}" .venv/bin/python -m pii_gateway.sandbox --workspace "$WORKSPACE" --write-root "$WORKSPACE/out" \
     --runtime-root "$PWD/.venv" --protect "$RUN/vault" --protect "$RUN/dumps" --demo-agent \
     -- "$PWD/.venv/bin/python" "${AGENT_ARGS[@]}" "$TASK"
 else
-  .venv/bin/python -m pii_gateway.demo_agent "${AGENT_ARGS[@]}" "$TASK"
+  "${AGENT_ENV[@]}" .venv/bin/python -m pii_gateway.demo_agent "${AGENT_ARGS[@]}" "$TASK"
 fi
 .venv/bin/python -m pii_gateway.report --dumps "$RUN/dumps" --project demo --out "$RUN/report.html"
 echo "Отчёт: $RUN/report.html"
