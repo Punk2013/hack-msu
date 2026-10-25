@@ -3,67 +3,68 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PII Gateway — Zero-Trust Privacy Layer for AI Agents</title>
+  <title>PII Gateway — Zero-Trust Test Harness & Visual Architecture</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="static/styles.css">
 </head>
 <body class="dark-theme">
-  <!-- Glow background aura -->
+  <!-- Glowing atmospheric backdrop -->
   <div class="aura-glow aura-top-left"></div>
   <div class="aura-glow aura-bottom-right"></div>
+  <div class="aura-glow aura-center"></div>
   <div class="grid-overlay"></div>
 
-  <!-- Main Navigation Header -->
+  <!-- App Header -->
   <header class="app-header">
     <div class="header-left">
       <div class="brand-logo">
         <div class="logo-shield">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
         <div class="brand-text">
-          <div class="brand-title">PII GATEWAY <span class="badge-accent">DEFENSE 2026</span></div>
-          <div class="brand-sub">Zero-Trust Privacy & Pseudonymization Layer for Autonomous Agents</div>
+          <div class="brand-title">PII GATEWAY <span class="badge-accent">TEST HARNESS &amp; SHOWCASE</span></div>
+          <div class="brand-sub">Сквозной контроль промежуточных слоев и Zero-Trust защита ПДн</div>
         </div>
       </div>
     </div>
 
-    <!-- Live Status Badges -->
+    <!-- Live Telemetry Strip -->
     <div class="header-status-strip">
-      <div class="status-chip chip-online" title="Gateway активен на локальном порту 8787">
+      <div class="status-chip chip-online" title="Gateway активен на порту 8790/8787">
         <span class="status-pulse"></span>
-        <span class="chip-label">GATEWAY: <strong id="lbl-gw-status">ACTIVE</strong></span>
+        <span class="chip-label">HARNESS: <strong id="lbl-gw-status">ACTIVE</strong></span>
       </div>
-      <div class="status-chip chip-vault" title="SQLite Vault защищен правами 0600 и изолирован от sandbox">
+      <div class="status-chip chip-vault" title="SQLite Vault изолирован вне workspace с правами 0600">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
         <span class="chip-label">VAULT: <strong>0600 SQLITE</strong></span>
       </div>
-      <div class="status-chip chip-canary" title="Независимый Upstream Spy: 0 канареек в исходящем трафике">
+      <div class="status-chip chip-canary" title="Независимый Upstream Spy: 0 утечек канареек">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-        <span class="chip-label">LEAKS: <strong>0 DETECTED</strong></span>
+        <span class="chip-label">SPY: <strong>0 LEAKS</strong></span>
       </div>
-      <div class="status-chip chip-fidelity" title="Roundtrip accuracy restore(mask(x)) == x">
+      <div class="status-chip chip-fidelity" title="Roundtrip accuracy: restore(mask(x)) == x">
         <span class="chip-label">ACCURACY: <strong>100.0%</strong></span>
       </div>
     </div>
 
-    <!-- Primary Navigation Tabs -->
+    <!-- Navigation Tabs -->
     <nav class="nav-tabs" id="main-tabs">
-      <button class="nav-tab active" data-tab="pipeline">
-        <span class="tab-icon">🎬</span>
-        <span>Конвейер защиты</span>
+      <button class="nav-tab active" data-tab="harness">
+        <span class="tab-icon">🔬</span>
+        <span>Тестовый Харнесс (Слои)</span>
       </button>
       <button class="nav-tab" data-tab="playground">
         <span class="tab-icon">⚡</span>
-        <span>Песочница</span>
+        <span>Песочница и Diff</span>
       </button>
       <button class="nav-tab" data-tab="vault">
         <span class="tab-icon">🗄️</span>
-        <span>Таблица Vault</span>
+        <span>Таблица Vault (0600)</span>
       </button>
       <button class="nav-tab" data-tab="metrics">
         <span class="tab-icon">📊</span>
@@ -76,209 +77,274 @@
   <main class="app-main">
 
     <!-- ======================================================== -->
-    <!-- TAB 1: INTERACTIVE PIPELINE DEMO (HERO PRESENTATION)     -->
+    <!-- TAB 1: FULL PIPELINE TEST HARNESS (INTERMEDIATE LAYERS)  -->
     <!-- ======================================================== -->
-    <section class="tab-content active" id="tab-pipeline">
-      <!-- Preset Bar & Mode Switcher -->
+    <section class="tab-content active" id="tab-harness">
+
+      <!-- Dynamic Case Controller & Generation Bar -->
       <div class="glass-panel control-toolbar">
-        <div class="toolbar-group">
-          <span class="group-title">Демо-кейсы:</span>
-          <div class="preset-buttons" id="pipeline-presets">
-            <button class="btn-preset active" data-case="client1">
-              <span class="preset-icon">📄</span> Клиент 1 (Иванов И.П.)
-            </button>
-            <button class="btn-preset" data-case="client2">
-              <span class="preset-icon">👥</span> Клиент 2 (Смирнова А.С. + Менеджер)
-            </button>
-            <button class="btn-preset" data-case="loan">
-              <span class="preset-icon">📑</span> Договор и Паспорт РФ
-            </button>
-            <button class="btn-preset" data-case="inflection">
-              <span class="preset-icon">✍️</span> Падежи в переписке
-            </button>
+        <div class="toolbar-left-flow">
+          <div class="case-selection-wrap">
+            <span class="group-title">Тестовый кейс:</span>
+            <select id="sel-harness-case" class="select-styled select-glow">
+              <option value="">Загрузка кейсов...</option>
+            </select>
           </div>
+
+          <button class="btn-generate-case glow-amber" id="btn-generate-case" title="Сгенерировать случайное ФИО, телефон, email, паспорт и статус">
+            <span class="dice-icon">🎲</span>
+            <span>Сгенерировать новый кейс</span>
+          </button>
         </div>
 
-        <div class="toolbar-group">
-          <span class="group-title">Режим обезличивания:</span>
+        <div class="toolbar-right-flow">
           <div class="mode-toggle-group">
-            <button class="btn-mode active" id="btn-mode-realistic" data-mode="realistic">
-              <span class="mode-icon">🕶️</span> Realistic (Синтетика)
+            <button class="btn-mode active" id="btn-mode-realistic" data-mode="realistic" title="Вымышленные ФИО и телефоны с сохранением формата">
+              <span class="mode-icon">🕶️</span> Realistic
             </button>
-            <button class="btn-mode" id="btn-mode-marker" data-mode="marker">
-              <span class="mode-icon">🏷️</span> Marker ([PERSON_1])
+            <button class="btn-mode" id="btn-mode-marker" data-mode="marker" title="Маркеры вида [PERSON_1]">
+              <span class="mode-icon">🏷️</span> Marker
             </button>
           </div>
-        </div>
 
-        <div class="toolbar-group toolbar-actions">
-          <button class="btn-primary glow-cyan" id="btn-pipeline-play">
+          <label class="toggle-fail-closed" title="Проверить защиту: смоделировать сбой и убедиться, что наружу ушло 0 байт">
+            <input type="checkbox" id="chk-fail-closed">
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">Инъекция сбоя (Fail-Closed)</span>
+          </label>
+
+          <button class="btn-primary glow-cyan" id="btn-run-harness">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            <span>Запустить сквозной цикл</span>
-          </button>
-          <button class="btn-secondary" id="btn-pipeline-step">
-            <span>Следующий шаг ➔</span>
-          </button>
-          <button class="btn-ghost" id="btn-pipeline-reset" title="Сбросить анимацию">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+            <span>Запустить Харнесс</span>
           </button>
         </div>
       </div>
 
-      <!-- Pipeline Timeline Stepper -->
-      <div class="stepper-container">
-        <div class="stepper-track">
-          <div class="stepper-progress" id="stepper-progress-bar"></div>
-        </div>
-        <div class="stepper-steps">
-          <div class="step-item active" data-step="1">
-            <div class="step-circle">1</div>
-            <div class="step-label">Входной документ</div>
-            <div class="step-sub">Локальный файл с ПДн</div>
-          </div>
-          <div class="step-item" data-step="2">
-            <div class="step-circle">2</div>
-            <div class="step-label">Детекция и Vault</div>
-            <div class="step-sub">NER + Защита 0600</div>
-          </div>
-          <div class="step-item" data-step="3">
-            <div class="step-circle">3</div>
-            <div class="step-label">Запрос к Upstream</div>
-            <div class="step-sub">0 утечек во внешней сети</div>
-          </div>
-          <div class="step-item" data-step="4">
-            <div class="step-circle">4</div>
-            <div class="step-label">Ответ модели</div>
-            <div class="step-sub">Генерация со склонениями</div>
-          </div>
-          <div class="step-item" data-step="5">
-            <div class="step-circle">5</div>
-            <div class="step-label">Восстановление</div>
-            <div class="step-sub">Точный обратный mapping</div>
-          </div>
-          <div class="step-item" data-step="6">
-            <div class="step-circle">6</div>
-            <div class="step-label">Итоговый документ</div>
-            <div class="step-sub">Реальные ПДн у клиента</div>
-          </div>
-        </div>
+      <!-- Quick Layer Breadcrumb Navigation -->
+      <div class="harness-layer-nav" id="harness-layer-nav">
+        <button class="layer-nav-item active" data-target="layer-1-input">
+          <span class="layer-nav-num">1</span> Входной документ
+        </button>
+        <button class="layer-nav-item" data-target="layer-2-detect">
+          <span class="layer-nav-num">2</span> Детекция (NER)
+        </button>
+        <button class="layer-nav-item" data-target="layer-3-vault">
+          <span class="layer-nav-num">3</span> Vault (0600)
+        </button>
+        <button class="layer-nav-item" data-target="layer-4-mask">
+          <span class="layer-nav-num">4</span> Запрос (0 утечек)
+        </button>
+        <button class="layer-nav-item" data-target="layer-5-upstream">
+          <span class="layer-nav-num">5</span> Ответ модели
+        </button>
+        <button class="layer-nav-item" data-target="layer-6-restore">
+          <span class="layer-nav-num">6</span> Восстановление
+        </button>
+        <button class="layer-nav-item" data-target="layer-7-verify">
+          <span class="layer-nav-num">7</span> Итог и Diff
+        </button>
       </div>
 
-      <!-- Live Split Visualization Cards -->
-      <div class="pipeline-split-grid">
-        <!-- Step 1 & 2: Local Agent Workspace -->
-        <div class="pipeline-card card-local" id="card-stage-local">
-          <div class="card-header">
-            <div class="card-title">
-              <span class="card-badge badge-local">ХОСТ АГЕНТА</span>
-              <h3>1. Исходный документ клиента</h3>
+      <!-- HARNESS LAYERS CONTAINER -->
+      <div class="harness-layers-stack" id="harness-layers-container">
+
+        <!-- LAYER 1: Input Document & Editable Context -->
+        <div class="harness-layer-card border-violet" id="layer-1-input">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-violet">СЛОЙ 1</span>
+              <h3>Входной контекст агента (Входной документ)</h3>
+              <span class="sub-hint">Текст можно редактировать вручную прямо здесь</span>
             </div>
-            <div class="card-telemetry">
-              <span class="telemetry-item" id="tag-detected-count">4 сущности обнаружено</span>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="editor-view" id="view-original-text">
-              <!-- Rendered with highlighted spans -->
+            <div class="layer-header-right">
+              <span class="pill-metric" id="l1-metric-chars">-- символов</span>
+              <button class="btn-mini-action" id="btn-reset-input" title="Сбросить к оригиналу">Сброс</button>
             </div>
           </div>
-          <div class="card-footer pii-legend">
-            <span class="legend-badge badge-person">👤 PERSON</span>
-            <span class="legend-badge badge-phone">📞 PHONE</span>
-            <span class="legend-badge badge-email">✉️ EMAIL</span>
-            <span class="legend-badge badge-passport">🪪 PASSPORT_RU</span>
+          <div class="layer-body">
+            <div class="editor-wrap">
+              <textarea id="harness-input-text" class="harness-editable-textarea" rows="6" placeholder="Введите или выберите документ с ПДн..."></textarea>
+            </div>
+            <div class="input-controls-row">
+              <div class="prompt-customizer">
+                <span class="label-tiny">Инструкция модели (LLM Prompt):</span>
+                <input type="text" id="harness-llm-prompt" class="input-styled-text" value="Составь официальное уведомление клиенту на основании документа.">
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Middle Gateway Transformer Visual -->
-        <div class="pipeline-flow-connector" id="pipeline-connector">
-          <div class="connector-line">
-            <div class="particle-pulse"></div>
-          </div>
-          <div class="gateway-core-box">
-            <div class="core-icon-pulse">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-              </svg>
+        <!-- LAYER 2: PII Detection (NER & Regex) -->
+        <div class="harness-layer-card border-cyan" id="layer-2-detect">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-cyan">СЛОЙ 2</span>
+              <h3>Детекция ПДн (Spans, Токены и Уверенность)</h3>
+              <span class="sub-hint">Natasha NER + Regex экстракторы по ARCHITECTURE.md §4</span>
             </div>
-            <div class="core-label">PII GATEWAY</div>
-            <div class="core-sub">CorePipeline</div>
-            <div class="core-stats" id="core-latency-display">~45 ms</div>
+            <div class="layer-header-right">
+              <span class="pill-latency" id="l2-metric-latency">Detect: -- ms</span>
+              <span class="pill-metric" id="l2-metric-count">0 найдено</span>
+            </div>
+          </div>
+          <div class="layer-body">
+            <div class="table-mini-responsive">
+              <table class="table-compact" id="table-detected-spans">
+                <thead>
+                  <tr>
+                    <th>Тип ПДн</th>
+                    <th>Исходный текст</th>
+                    <th>Диапазон [start, end)</th>
+                    <th>Детектор</th>
+                    <th>Уверенность</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-detected-spans">
+                  <tr><td colspan="5" class="td-muted">Запустите харнесс для анализа...</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
-        <!-- Step 3: Upstream Cloud View (ZERO LEAK) -->
-        <div class="pipeline-card card-upstream" id="card-stage-upstream">
-          <div class="card-header">
-            <div class="card-title">
-              <span class="card-badge badge-upstream">ВНЕШНИЙ ПРОВАЙДЕР</span>
-              <h3>3. Что получает облачная LLM</h3>
+        <!-- LAYER 3: Vault Security & Mapping Table -->
+        <div class="harness-layer-card border-indigo" id="layer-3-vault">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-indigo">СЛОЙ 3</span>
+              <h3>Хранилище Vault &amp; Падежные формы (SQLite 0600)</h3>
+              <span class="sub-hint">Изолировано от агента, WAL-режим, сохранение падежных окончаний</span>
             </div>
-            <div class="card-telemetry">
-              <span class="telemetry-badge-clean">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                ZERO PII LEAK
-              </span>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="editor-view text-masked" id="view-masked-text">
-              <!-- Masked text shown to provider -->
+            <div class="layer-header-right">
+              <span class="pill-security">Права: 0600</span>
+              <span class="pill-metric" id="l3-metric-pairs">-- пар</span>
             </div>
           </div>
-          <div class="card-footer status-note">
-            <span class="icon-shield">🛡️</span> Модель видит только вымышленные данные и не знает, что работает с обезличенной копией.
-          </div>
-        </div>
-      </div>
-
-      <!-- Bottom Row: LLM Generation & Restoration Cycle -->
-      <div class="pipeline-split-grid bottom-grid">
-        <!-- Step 4: Model response -->
-        <div class="pipeline-card card-reply" id="card-stage-reply">
-          <div class="card-header">
-            <div class="card-title">
-              <span class="card-badge badge-reply">ОТВЕТ АССИСТЕНТА</span>
-              <h3>4. Генерация модели (Склонение псевдонима)</h3>
+          <div class="layer-body">
+            <div class="vault-layer-grid">
+              <div class="vault-db-meta">
+                <div class="meta-row"><strong>Путь БД:</strong> <code id="l3-db-path">~/.local/share/pii-gateway/vault/harness-demo.db</code></div>
+                <div class="meta-row"><strong>Изоляция:</strong> <span class="text-green">Вне workspace агента (чтение заблокировано)</span></div>
+                <div class="meta-row"><strong>Таблицы:</strong> <code>entities, surfaces, pairs, entity_keys, audit</code></div>
+              </div>
+              <div class="table-mini-responsive">
+                <table class="table-compact" id="table-vault-mappings">
+                  <thead>
+                    <tr>
+                      <th>Entity ID</th>
+                      <th>Тип</th>
+                      <th>Оригинал</th>
+                      <th>Замена (Псевдоним)</th>
+                      <th>Склонение (6 падежей)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-vault-mappings">
+                    <tr><td colspan="5" class="td-muted">Данные появятся после обработки...</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div class="card-telemetry">
-              <span class="telemetry-item">Склонение ФИО: ДАТЕЛЬНЫЙ</span>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="editor-view" id="view-llm-reply">
-              <!-- Simulated or real model output with inflections -->
-            </div>
-          </div>
-          <div class="card-footer note-subtle">
-            Модель обратилась к клиенту: <em>«Уважаемому Михаилу Викторовичу...»</em>
           </div>
         </div>
 
-        <!-- Step 5 & 6: Final Restored Document -->
-        <div class="pipeline-card card-final" id="card-stage-final">
-          <div class="card-header">
-            <div class="card-title">
-              <span class="card-badge badge-restored">ВОССТАНОВЛЕНИЕ</span>
-              <h3>6. Итоговый файл клиенту (Реальные ПДн)</h3>
+        <!-- LAYER 4: Outbound Transformation (Upstream Wire Payload) -->
+        <div class="harness-layer-card border-emerald" id="layer-4-mask">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-emerald">СЛОЙ 4</span>
+              <h3>Исходящий запрос к Upstream (Сетевой трафик без ПДн)</h3>
+              <span class="sub-hint">То, что видит облачный провайдер по HTTP (OpenAI Wire JSON)</span>
             </div>
-            <div class="card-telemetry">
-              <span class="telemetry-badge-complete">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
-                STATUS: COMPLETE
-              </span>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="editor-view text-restored" id="view-final-text">
-              <!-- Final restored text with real customer details -->
+            <div class="layer-header-right">
+              <span class="pill-latency" id="l4-metric-latency">Mask: -- ms</span>
+              <span class="pill-clean" id="l4-metric-canary">0 LEAKS DETECTED</span>
             </div>
           </div>
-          <div class="card-footer note-success">
-            <span class="icon-check">✓</span> Исходное ФИО восстановлено в правильном падеже: <strong>«Уважаемому Ивану Петровичу»</strong>.
+          <div class="layer-body">
+            <div class="wire-split-view">
+              <div class="wire-block">
+                <div class="wire-title">Обезличенный текст (messages[].content):</div>
+                <pre class="code-preview" id="l4-masked-content">Ожидание запуска...</pre>
+              </div>
+              <div class="wire-block">
+                <div class="wire-title">Сетевой JSON-запрос к OpenAI / DeepSeek:</div>
+                <pre class="code-preview json-format" id="l4-wire-json">{}</pre>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- LAYER 5: Upstream LLM Response (Model Output with Inflections) -->
+        <div class="harness-layer-card border-fuchsia" id="layer-5-upstream">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-fuchsia">СЛОЙ 5</span>
+              <h3>Ответ модели (Генерация со склонениями псевдонима)</h3>
+              <span class="sub-hint">Модель свободно склоняет вымышленное ФИО в естественном тексте</span>
+            </div>
+            <div class="layer-header-right">
+              <span class="pill-metric">Модель: qwen2.5:7b</span>
+            </div>
+          </div>
+          <div class="layer-body">
+            <div class="wire-split-view">
+              <div class="wire-block">
+                <div class="wire-title">Сырой ответ модели (До восстановления):</div>
+                <pre class="code-preview text-fuchsia" id="l5-model-raw">Ожидание генерации...</pre>
+              </div>
+              <div class="wire-block">
+                <div class="wire-title">HTTP JSON Ответ от Upstream Provider:</div>
+                <pre class="code-preview json-format" id="l5-wire-response">{}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LAYER 6: Inbound Restoration (Reverse Mapping) -->
+        <div class="harness-layer-card border-amber" id="layer-6-restore">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-amber">СЛОЙ 6</span>
+              <h3>Обратное восстановление (Reverse Case Agreement)</h3>
+              <span class="sub-hint">Сопоставление склонений по Vault pairs и валидация статуса</span>
+            </div>
+            <div class="layer-header-right">
+              <span class="pill-latency" id="l6-metric-latency">Restore: -- ms</span>
+              <span class="pill-status" id="l6-metric-status">STATUS: --</span>
+            </div>
+          </div>
+          <div class="layer-body">
+            <div class="wire-block">
+              <div class="wire-title">Восстановленный текст (Реальные ПДн с сохранением падежей):</div>
+              <pre class="code-preview text-restored" id="l6-restored-preview">Ожидание обратной замены...</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- LAYER 7: Final Document & Side-by-Side Diff Verification -->
+        <div class="harness-layer-card border-mint" id="layer-7-verify">
+          <div class="layer-header">
+            <div class="layer-header-left">
+              <span class="layer-badge badge-mint">СЛОЙ 7</span>
+              <h3>Итоговая верификация и Diff-контроль</h3>
+              <span class="sub-hint">Сравнение исходных данных с восстановленными (Fidelity 100%)</span>
+            </div>
+            <div class="layer-header-right">
+              <span class="pill-fidelity" id="l7-metric-fidelity">FIDELITY: 100.0%</span>
+            </div>
+          </div>
+          <div class="layer-body">
+            <div class="diff-container">
+              <div class="diff-header-bar">
+                <span>Визуальный контроль токенов (зеленым выделены сохранённые оригиналы):</span>
+              </div>
+              <div class="diff-render-box" id="l7-diff-display">
+                Ожидание результатов верификации...
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -287,19 +353,9 @@
     <!-- ======================================================== -->
     <section class="tab-content" id="tab-playground">
       <div class="playground-layout">
-        <!-- Left: Input Area -->
         <div class="glass-panel play-input-panel">
           <div class="panel-header">
-            <h3>Входной текст для проверки</h3>
-            <div class="preset-dropdown-wrap">
-              <select id="sel-play-preset" class="select-styled">
-                <option value="">-- Выбрать типовой шаблон --</option>
-                <option value="client1">Карточка клиента (Иванов И.П.)</option>
-                <option value="client2">Клиент и менеджер (Смирнова А.С.)</option>
-                <option value="loan">Договор займа и паспорт РФ</option>
-                <option value="custom">Пользовательский ввод</option>
-              </select>
-            </div>
+            <h3>Входной текст для произвольной проверки</h3>
           </div>
           <textarea id="play-input-text" class="code-textarea" rows="12" placeholder="Введите любой текст с ФИО, телефонами, почтами или паспортами РФ на русском языке..."></textarea>
 
@@ -310,11 +366,10 @@
             </div>
             <button class="btn-primary glow-cyan" id="btn-play-run">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-              <span>Выполнить Mask & Restore</span>
+              <span>Выполнить Mask &amp; Restore</span>
             </button>
           </div>
 
-          <!-- Detected Spans Pill List -->
           <div class="detected-spans-container">
             <h4>Найденные сущности:</h4>
             <div class="spans-tags-list" id="play-spans-list">
@@ -323,18 +378,16 @@
           </div>
         </div>
 
-        <!-- Right: Results & Latency Telemetry -->
         <div class="glass-panel play-results-panel">
           <div class="panel-header">
             <h3>Результаты обработки Gateway</h3>
-            <div class="latency-pill-group" id="play-latency-badges">
+            <div class="latency-pill-group">
               <span class="lat-badge" id="lat-detect">Detect: -- ms</span>
               <span class="lat-badge" id="lat-mask">Mask: -- ms</span>
               <span class="lat-badge" id="lat-restore">Restore: -- ms</span>
             </div>
           </div>
 
-          <!-- Output Stage 1: Masked payload -->
           <div class="result-sub-block">
             <div class="sub-block-title">
               <span>Запрос провайдеру (Upstream Request Payload):</span>
@@ -343,7 +396,6 @@
             <pre class="code-output" id="play-out-masked">Текст появится после обработки...</pre>
           </div>
 
-          <!-- Output Stage 2: Restored text -->
           <div class="result-sub-block">
             <div class="sub-block-title">
               <span>Итоговый результат (Restored Text):</span>
@@ -441,7 +493,6 @@
     <!-- ======================================================== -->
     <section class="tab-content" id="tab-metrics">
       <div class="metrics-grid">
-        <!-- Big KPI Cards -->
         <div class="kpi-banner">
           <div class="kpi-card highlight-green">
             <div class="kpi-val">100.0%</div>
@@ -465,7 +516,6 @@
           </div>
         </div>
 
-        <!-- Architecture Breakdown -->
         <div class="glass-panel arch-panel">
           <h3>Архитектурные границы безопасности (Zero-Trust)</h3>
           <div class="arch-flow-diagram">
@@ -500,53 +550,6 @@
               <strong>Изолированное хранилище Vault:</strong> SQLite файл размещен в <code>~/.local/share/pii-gateway/vault/</code>. Агенту закрыт доступ по путям, права <code>0600</code>, WAL-журналирование.
             </div>
           </div>
-        </div>
-
-        <!-- Mode Comparison Matrix -->
-        <div class="glass-panel matrix-panel">
-          <h3>Сравнение режимов работы (ARCHITECTURE.md §4)</h3>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Критерий</th>
-                <th>Realistic Mode (Основной)</th>
-                <th>Marker Mode (Запасной)</th>
-                <th>Без Gateway (Passthrough)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Что видит LLM</strong></td>
-                <td><span class="text-green">Естественные ФИО и телефоны</span></td>
-                <td>Метки вида <code>[PERSON_1]</code></td>
-                <td><span class="text-danger">Реальные ПДн (УТЕЧКА)</span></td>
-              </tr>
-              <tr>
-                <td><strong>Склонение по падежам</strong></td>
-                <td><span class="text-green">Автоматически (все 6 падежей)</span></td>
-                <td>Маркер без склонения</td>
-                <td>Не требуется</td>
-              </tr>
-              <tr>
-                <td><strong>Осведомленность модели</strong></td>
-                <td>Модель не знает об обезличивании</td>
-                <td>Модель видит факт маскировки</td>
-                <td>Модель получает исходные данные</td>
-              </tr>
-              <tr>
-                <td><strong>Утечки во внешнюю сеть</strong></td>
-                <td><span class="text-green">0%</span></td>
-                <td><span class="text-green">0%</span></td>
-                <td><span class="text-danger">100% утечка</span></td>
-              </tr>
-              <tr>
-                <td><strong>Точность восстановления</strong></td>
-                <td><strong>100.0%</strong></td>
-                <td><strong>100.0%</strong></td>
-                <td>Исходные данные</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </section>

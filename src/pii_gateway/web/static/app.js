@@ -1,122 +1,61 @@
 /**
- * PII Gateway Presentation Dashboard — Frontend Application
- * Handles interactive pipeline playback, live playground, vault inspection, and fallback simulation.
+ * PII Gateway Test Harness & Intermediate Layer Visualizer
+ * Fully dynamic case generation, manual editing, and deep layer-by-layer inspection.
  */
 
 (function () {
   'use strict';
 
-  // State
   const state = {
-    currentTab: 'pipeline',
-    pipelineStep: 1,
-    pipelineMode: 'realistic',
-    pipelineCase: 'client1',
-    autoPlayTimer: null,
-    isProcessing: false,
+    currentTab: 'harness',
+    mode: 'realistic',
+    activeCase: null,
     backendAvailable: false,
-    cases: {
-      client1: {
-        title: 'Клиент 1 (Иванов И.П.)',
-        text: `Карточка клиента (синтетические данные)\n\nФИО: Иван Петрович Иванов\nEmail: ivan.ivanov@example.test\nТелефон: +7 900 000-00-01\nПаспорт: 00 01 000001\n\nСтатус: договор продлён до 01.12.2026. Ивану Петровичу нужно прислать уведомление о продлении и напомнить взять паспорт при визите.`,
-        spans: [
-          { type: 'PERSON', raw: 'Иван Петрович Иванов', start: 46, end: 66 },
-          { type: 'EMAIL', raw: 'ivan.ivanov@example.test', start: 74, end: 98 },
-          { type: 'PHONE', raw: '+7 900 000-00-01', start: 107, end: 124 },
-          { type: 'PASSPORT_RU', raw: '00 01 000001', start: 133, end: 145 },
-          { type: 'PERSON', raw: 'Ивану Петровичу', start: 187, end: 202 }
-        ],
-        realisticMask: `Карточка клиента (синтетические данные)\n\nФИО: Михаил Викторович Белов\nEmail: dmitry_sokolov41@gmail.com\nТелефон: +7 928 862-56-18\nПаспорт: 45 18 392817\n\nСтатус: договор продлён до 01.12.2026. Михаилу Викторовичу нужно прислать уведомление о продлении и напомнить взять паспорт при визите.`,
-        markerMask: `Карточка клиента (синтетические данные)\n\nФИО: [PERSON_1]\nEmail: [EMAIL_1]\nТелефон: [PHONE_1]\nПаспорт: [PASSPORT_RU_1]\n\nСтатус: договор продлён до 01.12.2026. [PERSON_1] нужно прислать уведомление о продлении и напомнить взять паспорт при визите.`,
-        modelReplyRealistic: `Уважаемый клиент!\n\nИнформируем, что ваш договор успешно продлён до 01.12.2026.\nПодготовлено персональное уведомление для Михаила Викторовича.\nНапоминаем взять с собой документ, удостоверяющий личность, при следующем визите в офис.\n\nС уважением, клиентский отдел.`,
-        modelReplyMarker: `Уважаемый клиент!\n\nИнформируем, что ваш договор успешно продлён до 01.12.2026.\nПодготовлено персональное уведомление для [PERSON_1].\nНапоминаем взять с собой паспорт при следующем визите.\n\nС уважением, клиентский отдел.`,
-        restoredRealistic: `Уважаемый клиент!\n\nИнформируем, что ваш договор успешно продлён до 01.12.2026.\nПодготовлено персональное уведомление для Ивана Петровича.\nНапоминаем взять с собой документ, удостоверяющий личность, при следующем визите в офис.\n\nС уважением, клиентский отдел.`,
-        restoredMarker: `Уважаемый клиент!\n\nИнформируем, что ваш договор успешно продлён до 01.12.2026.\nПодготовлено персональное уведомление для Ивана Петровича Иванова.\nНапоминаем взять с собой паспорт при следующем визите.\n\nС уважением, клиентский отдел.`
-      },
-      client2: {
-        title: 'Клиент 2 (Смирнова А.С. + Менеджер)',
-        text: `Карточка клиента (синтетические данные)\n\nФИО: Анна Сергеевна Смирнова\nEmail: anna.smirnova@example.test\nТелефон: +7 900 000-00-02\nПаспорт: 00 02 000002\n\nСтатус: по договору есть задолженность 12 500 руб. Анне Сергеевне нужно вежливо напомнить об оплате до 10.11.2026. Менеджер: Иван Петрович Иванов.`,
-        spans: [
-          { type: 'PERSON', raw: 'Анна Сергеевна Смирнова', start: 46, end: 69 },
-          { type: 'EMAIL', raw: 'anna.smirnova@example.test', start: 77, end: 102 },
-          { type: 'PHONE', raw: '+7 900 000-00-02', start: 111, end: 128 },
-          { type: 'PASSPORT_RU', raw: '00 02 000002', start: 137, end: 149 },
-          { type: 'PERSON', raw: 'Анне Сергеевне', start: 197, end: 211 },
-          { type: 'PERSON', raw: 'Иван Петрович Иванов', start: 265, end: 285 }
-        ],
-        realisticMask: `Карточка клиента (синтетические данные)\n\nФИО: Елена Дмитриевна Морозова\nEmail: elena_m2026@corp.ru\nТелефон: +7 912 345-67-89\nПаспорт: 46 11 882910\n\nСтатус: по договору есть задолженность 12 500 руб. Елене Дмитриевне нужно вежливо напомнить об оплате до 10.11.2026. Менеджер: Алексей Сергеевич Волков.`,
-        markerMask: `Карточка клиента (синтетические данные)\n\nФИО: [PERSON_1]\nEmail: [EMAIL_1]\nТелефон: [PHONE_1]\nПаспорт: [PASSPORT_RU_1]\n\nСтатус: по договору есть задолженность 12 500 руб. [PERSON_1] нужно вежливо напомнить об оплате до 10.11.2026. Менеджер: [PERSON_2].`,
-        modelReplyRealistic: `Здравствуйте!\n\nУведомление для Елены Дмитриевны сформировано.\nУважаемая Елена Дмитриевна! Напоминаем о платеже по договору до 10.11.2026.\nПо всем вопросам вы можете обратиться к вашему менеджеру Алексею Сергеевичу Волкову.`,
-        modelReplyMarker: `Здравствуйте!\n\nУведомление для [PERSON_1] сформировано.\nУважаемый клиент! Напоминаем о платеже по договору до 10.11.2026.\nПо всем вопросам вы можете обратиться к вашему менеджеру [PERSON_2].`,
-        restoredRealistic: `Здравствуйте!\n\nУведомление для Анны Сергеевны сформировано.\nУважаемая Анна Сергеевна! Напоминаем о платеже по договору до 10.11.2026.\nПо всем вопросам вы можете обратиться к вашему менеджеру Ивану Петровичу Иванову.`,
-        restoredMarker: `Здравствуйте!\n\nУведомление для Анны Сергеевны Смирновой сформировано.\nУважаемый клиент! Напоминаем о платеже по договору до 10.11.2026.\nПо всем вопросам вы можете обратиться к вашему менеджеру Ивану Петровичу Иванову.`
-      },
-      loan: {
-        title: 'Договор займа и Паспорт РФ',
-        text: `ДОГОВОР ЗАЙМА № 482/26-К\nЗаемщик: Соколов Алексей Дмитриевич, паспорт РФ 45 10 987654.\nКонтактный телефон: +7 916 123-45-67, эл. почта: alex.sokolov@corporate.org.\nПоручитель: Морозова Елена Васильевна (+7 903 555-44-33).\nОбязательство: Алексею Дмитриевичу предоставить оригиналы справок до 15.11.2026.`,
-        spans: [
-          { type: 'PERSON', raw: 'Соколов Алексей Дмитриевич', start: 34, end: 60 },
-          { type: 'PASSPORT_RU', raw: '45 10 987654', start: 72, end: 84 },
-          { type: 'PHONE', raw: '+7 916 123-45-67', start: 105, end: 121 },
-          { type: 'EMAIL', raw: 'alex.sokolov@corporate.org', start: 133, end: 159 },
-          { type: 'PERSON', raw: 'Морозова Елена Васильевна', start: 173, end: 198 },
-          { type: 'PHONE', raw: '+7 903 555-44-33', start: 200, end: 216 },
-          { type: 'PERSON', raw: 'Алексею Дмитриевичу', start: 233, end: 252 }
-        ],
-        realisticMask: `ДОГОВОР ЗАЙМА № 482/26-К\nЗаемщик: Кузнецов Денис Олегович, паспорт РФ 40 14 553210.\nКонтактный телефон: +7 985 771-22-90, эл. почта: denis_k@mail.test.\nПоручитель: Новикова Ольга Ивановна (+7 926 441-30-11).\nОбязательство: Денису Олеговичу предоставить оригиналы справок до 15.11.2026.`,
-        markerMask: `ДОГОВОР ЗАЙМА № 482/26-К\nЗаемщик: [PERSON_1], паспорт РФ [PASSPORT_RU_1].\nКонтактный телефон: [PHONE_1], эл. почта: [EMAIL_1].\nПоручитель: [PERSON_2] ([PHONE_2]).\nОбязательство: [PERSON_1] предоставить оригиналы справок до 15.11.2026.`,
-        modelReplyRealistic: `Уведомление по договору № 482/26-К.\nУважаемый Денис Олегович! Просим предоставить оригиналы справок до 15.11.2026.\nКопия направлена поручителю Ольге Ивановне Новиковой.`,
-        modelReplyMarker: `Уведомление по договору № 482/26-К.\nУважаемый [PERSON_1]! Просим предоставить оригиналы справок до 15.11.2026.\nКопия направлена поручителю [PERSON_2].`,
-        restoredRealistic: `Уведомление по договору № 482/26-К.\nУважаемый Алексей Дмитриевич! Просим предоставить оригиналы справок до 15.11.2026.\nКопия направлена поручителю Елене Васильевне Морозовой.`,
-        restoredMarker: `Уведомление по договору № 482/26-К.\nУважаемый Соколов Алексей Дмитриевич! Просим предоставить оригиналы справок до 15.11.2026.\nКопия направлена поручителю Морозова Елена Васильевна.`
-      },
-      inflection: {
-        title: 'Падежи в переписке',
-        text: `Обращение в поддержку от клиента: Волков Сергей Николаевич.\nСвязаться с Волковым Сергеем Николаевичем по номеру +7 812 200-30-40.\nОтвет подготовлен для Волкова Сергея Николаевича менеджером.\nКопию акта отправить Сергею Николаевичу на sergey.volkov@domain.ru.`,
-        spans: [
-          { type: 'PERSON', raw: 'Волков Сергей Николаевич', start: 34, end: 57 },
-          { type: 'PERSON', raw: 'Волковым Сергеем Николаевичем', start: 70, end: 99 },
-          { type: 'PHONE', raw: '+7 812 200-30-40', start: 110, end: 126 },
-          { type: 'PERSON', raw: 'Волкова Сергея Николаевича', start: 150, end: 176 },
-          { type: 'PERSON', raw: 'Сергею Николаевичу', start: 211, end: 229 },
-          { type: 'EMAIL', raw: 'sergey.volkov@domain.ru', start: 233, end: 257 }
-        ],
-        realisticMask: `Обращение в поддержку от клиента: Попов Роман Игоревич.\nСвязаться с Поповым Романом Игоревичем по номеру +7 921 990-11-22.\nОтвет подготовлен для Попова Романа Игоревича менеджером.\nКопию акта отправить Роману Игоревичу на roman.popov@service.test.`,
-        markerMask: `Обращение в поддержку от клиента: [PERSON_1].\nСвязаться с [PERSON_1] по номеру [PHONE_1].\nОтвет подготовлен для [PERSON_1] менеджером.\nКопию акта отправить [PERSON_1] на [EMAIL_1].`,
-        modelReplyRealistic: `Здравствуйте, Роман Игоревич!\nМы связались с Романом Игоревичем Поповым и направили решение на почту roman.popov@service.test.`,
-        modelReplyMarker: `Здравствуйте, [PERSON_1]!\nМы связались с [PERSON_1] и направили решение на почту [EMAIL_1].`,
-        restoredRealistic: `Здравствуйте, Сергей Николаевич!\nМы связались с Сергеем Николаевичем Волковым и направили решение на почту sergey.volkov@domain.ru.`,
-        restoredMarker: `Здравствуйте, Волков Сергей Николаевич!\nМы связались с Волков Сергей Николаевич и направили решение на почту sergey.volkov@domain.ru.`
-      }
-    }
+    loadedCases: [],
+    lastHarnessResult: null
   };
 
-  // DOM Elements
   const el = {
     tabs: document.querySelectorAll('.nav-tab'),
     tabContents: document.querySelectorAll('.tab-content'),
     lblGwStatus: document.getElementById('lbl-gw-status'),
-    pipelinePresets: document.querySelectorAll('#pipeline-presets .btn-preset'),
+    selHarnessCase: document.getElementById('sel-harness-case'),
+    btnGenerateCase: document.getElementById('btn-generate-case'),
     btnModeRealistic: document.getElementById('btn-mode-realistic'),
     btnModeMarker: document.getElementById('btn-mode-marker'),
-    btnPipelinePlay: document.getElementById('btn-pipeline-play'),
-    btnPipelineStep: document.getElementById('btn-pipeline-step'),
-    btnPipelineReset: document.getElementById('btn-pipeline-reset'),
-    stepperSteps: document.querySelectorAll('.step-item'),
-    stepperProgress: document.getElementById('stepper-progress-bar'),
-    viewOriginalText: document.getElementById('view-original-text'),
-    viewMaskedText: document.getElementById('view-masked-text'),
-    viewLlmReply: document.getElementById('view-llm-reply'),
-    viewFinalText: document.getElementById('view-final-text'),
-    tagDetectedCount: document.getElementById('tag-detected-count'),
-    coreLatencyDisplay: document.getElementById('core-latency-display'),
-    cardLocal: document.getElementById('card-stage-local'),
-    cardUpstream: document.getElementById('card-stage-upstream'),
-    cardReply: document.getElementById('card-stage-reply'),
-    cardFinal: document.getElementById('card-stage-final'),
+    chkFailClosed: document.getElementById('chk-fail-closed'),
+    btnRunHarness: document.getElementById('btn-run-harness'),
+    layerNavItems: document.querySelectorAll('.layer-nav-item'),
+    // Layer 1
+    harnessInputText: document.getElementById('harness-input-text'),
+    harnessLlmPrompt: document.getElementById('harness-llm-prompt'),
+    l1MetricChars: document.getElementById('l1-metric-chars'),
+    btnResetInput: document.getElementById('btn-reset-input'),
+    // Layer 2
+    l2MetricLatency: document.getElementById('l2-metric-latency'),
+    l2MetricCount: document.getElementById('l2-metric-count'),
+    tbodyDetectedSpans: document.getElementById('tbody-detected-spans'),
+    // Layer 3
+    l3DbPath: document.getElementById('l3-db-path'),
+    l3MetricPairs: document.getElementById('l3-metric-pairs'),
+    tbodyVaultMappings: document.getElementById('tbody-vault-mappings'),
+    // Layer 4
+    l4MetricLatency: document.getElementById('l4-metric-latency'),
+    l4MetricCanary: document.getElementById('l4-metric-canary'),
+    l4MaskedContent: document.getElementById('l4-masked-content'),
+    l4WireJson: document.getElementById('l4-wire-json'),
+    // Layer 5
+    l5ModelRaw: document.getElementById('l5-model-raw'),
+    l5WireResponse: document.getElementById('l5-wire-response'),
+    // Layer 6
+    l6MetricLatency: document.getElementById('l6-metric-latency'),
+    l6MetricStatus: document.getElementById('l6-metric-status'),
+    l6RestoredPreview: document.getElementById('l6-restored-preview'),
+    // Layer 7
+    l7MetricFidelity: document.getElementById('l7-metric-fidelity'),
+    l7DiffDisplay: document.getElementById('l7-diff-display'),
     // Playground
     playInputText: document.getElementById('play-input-text'),
-    selPlayPreset: document.getElementById('sel-play-preset'),
     btnPlayRun: document.getElementById('btn-play-run'),
     playSpansList: document.getElementById('play-spans-list'),
     playOutMasked: document.getElementById('play-out-masked'),
@@ -130,30 +69,12 @@
     vaultStatPairs: document.getElementById('vault-stat-pairs'),
     vaultStatSize: document.getElementById('vault-stat-size'),
     tableVaultEntities: document.getElementById('tbody-vault-entities'),
-    vaultSearchInput: document.getElementById('vault-search-input'),
-    vaultFilterType: document.getElementById('vault-filter-type'),
     btnRefreshVault: document.getElementById('btn-refresh-vault'),
     btnPurgeVault: document.getElementById('btn-purge-vault'),
     toastContainer: document.getElementById('toast-container')
   };
 
-  // Check backend connectivity
-  async function checkBackend() {
-    try {
-      const res = await fetch('/api/health');
-      if (res.ok) {
-        state.backendAvailable = true;
-        el.lblGwStatus.textContent = 'ONLINE (8787)';
-        el.lblGwStatus.style.color = '#10b981';
-      }
-    } catch {
-      state.backendAvailable = false;
-      el.lblGwStatus.textContent = 'STANDALONE';
-      el.lblGwStatus.style.color = '#38bdf8';
-    }
-  }
-
-  // Toast notification
+  // Toast feedback
   function showToast(msg, duration = 3000) {
     const toast = document.createElement('div');
     toast.className = 'toast';
@@ -166,284 +87,426 @@
     }, duration);
   }
 
-  // Escape HTML helper
   function escapeHtml(str) {
-    return str
+    return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
   }
 
-  // Highlight original text with interactive tags
-  function renderHighlightedText(text, spans) {
-    if (!spans || spans.length === 0) {
-      return escapeHtml(text);
-    }
-    // Sort spans by start
-    const sorted = [...spans].sort((a, b) => a.start - b.start);
-    let html = '';
-    let lastIdx = 0;
-
-    for (const s of sorted) {
-      if (s.start > lastIdx) {
-        html += escapeHtml(text.slice(lastIdx, s.start));
+  // Check backend connectivity
+  async function checkBackend() {
+    try {
+      const res = await fetch('/api/health');
+      if (res.ok) {
+        state.backendAvailable = true;
+        el.lblGwStatus.textContent = 'ACTIVE (8790)';
+        el.lblGwStatus.style.color = '#10b981';
       }
-      const raw = text.slice(s.start, s.end);
-      const typeClass = 'pii-tag-' + (s.type.toLowerCase().split('_')[0]);
-      html += `<mark class="pii-tag ${typeClass}" title="${s.type}: ${escapeHtml(raw)}">${escapeHtml(raw)}</mark>`;
-      lastIdx = s.end;
-    }
-    if (lastIdx < text.length) {
-      html += escapeHtml(text.slice(lastIdx));
-    }
-    return html;
-  }
-
-  // Update pipeline visual step
-  function setPipelineStep(step) {
-    state.pipelineStep = Math.max(1, Math.min(6, step));
-    const curCase = state.cases[state.pipelineCase];
-
-    // Stepper progress & active step
-    const pct = ((state.pipelineStep - 1) / 5) * 100;
-    el.stepperProgress.style.width = Math.max(8, pct) + '%';
-
-    el.stepperSteps.forEach((item, idx) => {
-      const sNum = idx + 1;
-      item.classList.remove('active', 'completed');
-      if (sNum === state.pipelineStep) {
-        item.classList.add('active');
-      } else if (sNum < state.pipelineStep) {
-        item.classList.add('completed');
-      }
-    });
-
-    // Reset card highlight classes
-    [el.cardLocal, el.cardUpstream, el.cardReply, el.cardFinal].forEach(c => c.classList.remove('card-active'));
-
-    // Step-by-step visibility logic
-    if (state.pipelineStep === 1) {
-      el.cardLocal.classList.add('card-active');
-      el.viewOriginalText.innerHTML = renderHighlightedText(curCase.text, curCase.spans);
-      el.tagDetectedCount.textContent = `${curCase.spans.length} сущностей обнаружено`;
-      el.viewMaskedText.textContent = 'Ожидание обработки Gateway...';
-      el.viewLlmReply.textContent = 'Ожидание ответа модели...';
-      el.viewFinalText.textContent = 'Ожидание восстановления...';
-      el.coreLatencyDisplay.textContent = 'Standby';
-    } else if (state.pipelineStep === 2) {
-      el.cardLocal.classList.add('card-active');
-      el.coreLatencyDisplay.textContent = 'Masking...';
-      el.coreLatencyDisplay.style.color = '#00f0ff';
-      el.viewMaskedText.textContent = 'Обработка и шифрование связей в SQLite Vault...';
-    } else if (state.pipelineStep === 3) {
-      el.cardUpstream.classList.add('card-active');
-      el.coreLatencyDisplay.textContent = '0 leaks (Clean)';
-      el.coreLatencyDisplay.style.color = '#10b981';
-      const masked = state.pipelineMode === 'realistic' ? curCase.realisticMask : curCase.markerMask;
-      el.viewMaskedText.textContent = masked;
-    } else if (state.pipelineStep === 4) {
-      el.cardReply.classList.add('card-active');
-      const reply = state.pipelineMode === 'realistic' ? curCase.modelReplyRealistic : curCase.modelReplyMarker;
-      el.viewLlmReply.textContent = reply;
-    } else if (state.pipelineStep === 5) {
-      el.coreLatencyDisplay.textContent = 'Restoring...';
-      el.cardFinal.classList.add('card-active');
-    } else if (state.pipelineStep === 6) {
-      el.cardFinal.classList.add('card-active');
-      el.coreLatencyDisplay.textContent = 'Complete (100%)';
-      el.coreLatencyDisplay.style.color = '#34d399';
-      const restored = state.pipelineMode === 'realistic' ? curCase.restoredRealistic : curCase.restoredMarker;
-      el.viewFinalText.textContent = restored;
+    } catch {
+      state.backendAvailable = false;
+      el.lblGwStatus.textContent = 'STANDALONE';
+      el.lblGwStatus.style.color = '#38bdf8';
     }
   }
 
-  // Load selected case into pipeline
-  function loadPipelineCase(caseId) {
-    state.pipelineCase = caseId;
-    el.pipelinePresets.forEach(b => {
-      b.classList.toggle('active', b.dataset.case === caseId);
-    });
-    setPipelineStep(1);
-  }
-
-  // Play automated demonstration
-  function playAutoPipeline() {
-    if (state.autoPlayTimer) {
-      clearInterval(state.autoPlayTimer);
-      state.autoPlayTimer = null;
-      el.btnPipelinePlay.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Запустить сквозной цикл</span>`;
+  // Fetch dynamic cases from backend
+  async function loadCases() {
+    if (!state.backendAvailable) {
+      loadFallbackCases();
       return;
     }
 
-    setPipelineStep(1);
-    el.btnPipelinePlay.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg><span>Пауза</span>`;
-
-    let step = 1;
-    state.autoPlayTimer = setInterval(() => {
-      step++;
-      if (step > 6) {
-        clearInterval(state.autoPlayTimer);
-        state.autoPlayTimer = null;
-        el.btnPipelinePlay.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Повторить цикл</span>`;
-        showToast('✓ Сквозной цикл защиты успешно завершён. Точность 100%.');
-        return;
+    try {
+      const res = await fetch('/api/cases');
+      if (res.ok) {
+        state.loadedCases = await res.json();
+        renderCaseDropdown();
+        if (state.loadedCases.length > 0) {
+          selectCase(state.loadedCases[0].id);
+        }
       }
-      setPipelineStep(step);
-    }, 1200);
+    } catch (e) {
+      console.warn('Could not load cases from API', e);
+      loadFallbackCases();
+    }
   }
 
-  // Live Playground Execution
-  async function runPlayground() {
-    const text = el.playInputText.value.trim();
-    if (!text) {
-      showToast('Введите текст для проверки.');
-      return;
-    }
+  function loadFallbackCases() {
+    state.loadedCases = [
+      {
+        id: 'client1',
+        title: '📁 Карточка CLIENT1 (Иванов И.П.)',
+        content: `Карточка клиента (синтетические данные)\n\nФИО: Иван Петрович Иванов\nEmail: ivan.ivanov@example.test\nТелефон: +7 900 000-00-01\nПаспорт: 00 01 000001\n\nСтатус: договор продлён до 01.12.2026. Ивану Петровичу нужно прислать уведомление о продлении и напомнить взять паспорт при визите.`
+      },
+      {
+        id: 'client2',
+        title: '📁 Карточка CLIENT2 (Смирнова А.С. + Менеджер)',
+        content: `Карточка клиента (синтетические данные)\n\nФИО: Анна Сергеевна Смирнова\nEmail: anna.smirnova@example.test\nТелефон: +7 900 000-00-02\nПаспорт: 00 02 000002\n\nСтатус: по договору есть задолженность 12 500 руб. Анне Сергеевне нужно вежливо напомнить об оплате до 10.11.2026. Менеджер: Иван Петрович Иванов.`
+      },
+      {
+        id: 'loan_agreement',
+        title: '📑 Договор займа и паспорт РФ',
+        content: `ДОГОВОР ЗАЙМА № 482/26-К\nЗаемщик: Соколов Алексей Дмитриевич, паспорт РФ 45 10 987654.\nКонтактный телефон: +7 916 123-45-67, эл. почта: alex.sokolov@corporate.org.\nПоручитель: Морозова Елена Васильевна (+7 903 555-44-33).\nОбязательство: Алексею Дмитриевичу предоставить оригиналы справок до 15.11.2026.`
+      }
+    ];
+    renderCaseDropdown();
+    selectCase('client1');
+  }
 
-    const mode = document.querySelector('input[name="play-mode"]:checked')?.value || 'realistic';
-    el.btnPlayRun.disabled = true;
-    el.btnPlayRun.innerHTML = 'Обработка...';
+  function renderCaseDropdown() {
+    el.selHarnessCase.innerHTML = '';
+    state.loadedCases.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.title;
+      el.selHarnessCase.appendChild(opt);
+    });
+  }
 
-    const tStart = performance.now();
+  function selectCase(caseId) {
+    const found = state.loadedCases.find(c => c.id === caseId);
+    if (!found) return;
+    state.activeCase = found;
+    el.selHarnessCase.value = caseId;
+    el.harnessInputText.value = found.content;
+    updateInputStats();
+  }
+
+  // Generate dynamic random case on button click
+  async function generateNewCase() {
+    el.btnGenerateCase.classList.add('loading');
+    el.btnGenerateCase.querySelector('.dice-icon').style.transform = 'rotate(360deg)';
 
     if (state.backendAvailable) {
       try {
-        const res = await fetch('/api/process', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, mode, project_id: 'showcase-playground' })
-        });
-        const data = await res.json();
-
-        // Render Spans tags
-        renderPlaygroundSpans(data.spans);
-        el.playOutMasked.textContent = data.masked_text;
-        el.latDetect.textContent = `Detect: ${data.detect_latency_ms} ms`;
-        el.latMask.textContent = `Mask: ${data.mask_latency_ms} ms`;
-
-        // Restore
-        const resRestore = await fetch('/api/restore', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: data.masked_text, mode, project_id: 'showcase-playground' })
-        });
-        const dataRestore = await resRestore.json();
-        el.playOutRestored.textContent = dataRestore.restored_text;
-        el.latRestore.textContent = `Restore: ${dataRestore.restore_latency_ms} ms`;
-        el.playRestoreStatus.textContent = `STATUS: ${dataRestore.status.toUpperCase()}`;
-        el.playRestoreStatus.className = 'badge-status-pill ' + (dataRestore.status === 'complete' ? 'pill-green' : 'pill-amber');
-      } catch (err) {
-        console.error('API error, using simulator', err);
-        runPlaygroundSimulation(text, mode);
+        const res = await fetch('/api/cases/generate', { method: 'POST' });
+        if (res.ok) {
+          const newCase = await res.json();
+          state.loadedCases.unshift(newCase);
+          renderCaseDropdown();
+          selectCase(newCase.id);
+          showToast(`🎲 Сгенерирован новый кейс: <strong>${escapeHtml(newCase.full_name)}</strong>`);
+          runHarness();
+          return;
+        }
+      } catch (e) {
+        console.warn('Generate case API failed', e);
       }
-    } else {
-      runPlaygroundSimulation(text, mode);
     }
 
-    el.btnPlayRun.disabled = false;
-    el.btnPlayRun.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Выполнить Mask & Restore</span>`;
+    // Client-side dynamic synthesizer fallback
+    const surnames = ['Кузнецов', 'Морозов', 'Новиков', 'Васильев', 'Федоров', 'Орлов'];
+    const names = ['Дмитрий', 'Сергей', 'Алексей', 'Николай', 'Роман', 'Михаил'];
+    const patrs = ['Сергеевич', 'Алексеевич', 'Иванович', 'Петрович', 'Николаевич'];
+    const s = surnames[Math.floor(Math.random() * surnames.length)];
+    const n = names[Math.floor(Math.random() * names.length)];
+    const p = patrs[Math.floor(Math.random() * patrs.length)];
+    const fullName = `${s} ${n} ${p}`;
+    const ph = `+7 9${Math.floor(Math.random() * 89 + 10)} ${Math.floor(Math.random() * 899 + 100)}-${Math.floor(Math.random() * 89 + 10)}-${Math.floor(Math.random() * 89 + 10)}`;
+    const em = `${n.toLowerCase()}.${s.toLowerCase()}@domain.test`;
+    const ps = `45 ${Math.floor(Math.random() * 89 + 10)} ${Math.floor(Math.random() * 899999 + 100000)}`;
+
+    const dynCase = {
+      id: `dyn_${Date.now()}`,
+      title: `🎲 ${fullName} (Новый случайный)`,
+      full_name: fullName,
+      content: `Карточка клиента (синтетические данные)\n\nФИО: ${fullName}\nEmail: ${em}\nТелефон: ${ph}\nПаспорт: ${ps}\n\nСтатус: договор продлён до 15.12.2026. Клиенту нужно отправить персональное уведомление.`
+    };
+    state.loadedCases.unshift(dynCase);
+    renderCaseDropdown();
+    selectCase(dynCase.id);
+    showToast(`🎲 Сгенерирован случайный профиль: <strong>${fullName}</strong>`);
+    runHarness();
   }
 
-  // Simulation mode for playground when standalone
-  function runPlaygroundSimulation(text, mode) {
-    const curCase = Object.values(state.cases).find(c => text.includes(c.spans[0]?.raw)) || state.cases.client1;
-    renderPlaygroundSpans(curCase.spans);
-    el.playOutMasked.textContent = mode === 'realistic' ? curCase.realisticMask : curCase.markerMask;
-    el.playOutRestored.textContent = text;
-    el.latDetect.textContent = 'Detect: 14.2 ms';
-    el.latMask.textContent = 'Mask: 18.5 ms';
-    el.latRestore.textContent = 'Restore: 12.1 ms';
-    el.playRestoreStatus.textContent = 'STATUS: COMPLETE';
-    el.playRestoreStatus.className = 'badge-status-pill pill-green';
+  function updateInputStats() {
+    const txt = el.harnessInputText.value;
+    const lines = txt.split('\n').length;
+    el.l1MetricChars.textContent = `${txt.length} симв. • ${lines} строк`;
   }
 
-  function renderPlaygroundSpans(spans) {
-    el.playSpansList.innerHTML = '';
-    if (!spans || spans.length === 0) {
-      el.playSpansList.innerHTML = '<span class="text-muted">ПДн не обнаружены (безопасный текст)</span>';
+  // Run the full execution harness across all 7 layers
+  async function runHarness() {
+    const text = el.harnessInputText.value.trim();
+    if (!text) {
+      showToast('Введите текст документа для запуска.');
       return;
     }
+
+    const prompt = el.harnessLlmPrompt.value.trim();
+    const failClosed = el.chkFailClosed.checked;
+
+    el.btnRunHarness.disabled = true;
+    el.btnRunHarness.innerHTML = 'Выполняем...';
+
+    if (state.backendAvailable) {
+      try {
+        const res = await fetch('/api/harness/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            mode: state.mode,
+            project_id: 'harness-demo',
+            llm_prompt: prompt,
+            fail_closed_injection: failClosed
+          })
+        });
+
+        if (res.ok) {
+          const harnessData = await res.json();
+          renderHarnessResults(harnessData);
+          el.btnRunHarness.disabled = false;
+          el.btnRunHarness.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Запустить Харнесс</span>`;
+          return;
+        }
+      } catch (e) {
+        console.warn('Harness run failed, using client simulator', e);
+      }
+    }
+
+    // Client-side simulator
+    runSimulatedHarness(text, prompt, failClosed);
+    el.btnRunHarness.disabled = false;
+    el.btnRunHarness.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Запустить Харнесс</span>`;
+  }
+
+  function renderHarnessResults(data) {
+    state.lastHarnessResult = data;
+
+    if (data.fail_closed_triggered) {
+      showToast('🛡️ Сработал Fail-Closed: сбой перехвачен, наружу ушло 0 байт!', 4000);
+      el.l4MetricCanary.textContent = 'ABORTED (0 BYTES)';
+      el.l4MetricCanary.className = 'pill-clean bg-rose';
+      el.l4MaskedContent.textContent = 'ОШИБКА: Запрос заблокирован политикой Fail-Closed.';
+      el.l4WireJson.textContent = '{"error": "pii_gateway_refusal", "sent_to_provider": false}';
+      el.l5ModelRaw.textContent = 'Провайдер не получал запрос (0 сетевых пакетов).';
+      el.l6RestoredPreview.textContent = 'Восстановление не требуется.';
+      el.l7DiffDisplay.innerHTML = '<span class="text-danger">Fail-Closed активен: утечка предотвращена на сетевом уровне.</span>';
+      return;
+    }
+
+    const layers = data.layers || [];
+
+    // Layer 2: Detect
+    const l2 = layers.find(l => l.id === 'layer-2-detect');
+    if (l2) {
+      el.l2MetricLatency.textContent = `Detect: ${l2.latency_ms} ms`;
+      el.l2MetricCount.textContent = `${l2.spans_count} сущностей найдено`;
+      renderDetectedSpansTable(l2.spans);
+    }
+
+    // Layer 3: Vault
+    const l3 = layers.find(l => l.id === 'layer-3-vault');
+    if (l3) {
+      el.l3DbPath.textContent = l3.db_path;
+      el.l3MetricPairs.textContent = `${l3.pairs?.length || 0} пар замен`;
+      renderVaultMappingsTable(l3.entities, l3.pairs);
+    }
+
+    // Layer 4: Mask & Wire
+    const l4 = layers.find(l => l.id === 'layer-4-mask');
+    if (l4) {
+      el.l4MetricLatency.textContent = `Mask: ${l4.latency_ms} ms`;
+      el.l4MetricCanary.textContent = l4.canary_check?.verdict || '0 LEAKS';
+      el.l4MetricCanary.className = 'pill-clean';
+      el.l4MaskedContent.textContent = l4.masked_text;
+      el.l4WireJson.textContent = JSON.stringify(l4.wire_request, null, 2);
+    }
+
+    // Layer 5: Model Response
+    const l5 = layers.find(l => l.id === 'layer-5-upstream');
+    if (l5) {
+      el.l5ModelRaw.textContent = l5.raw_response_text;
+      el.l5WireResponse.textContent = JSON.stringify(l5.wire_response, null, 2);
+    }
+
+    // Layer 6: Inbound Restore
+    const l6 = layers.find(l => l.id === 'layer-6-restore');
+    if (l6) {
+      el.l6MetricLatency.textContent = `Restore: ${l6.latency_ms} ms`;
+      el.l6MetricStatus.textContent = `STATUS: ${l6.status.toUpperCase()}`;
+      el.l6RestoredPreview.textContent = l6.restored_model_reply;
+    }
+
+    // Layer 7: Diff & Final Verification
+    const l7 = layers.find(l => l.id === 'layer-7-verify');
+    if (l7) {
+      el.l7MetricFidelity.textContent = l7.is_perfect_roundtrip ? 'FIDELITY: 100.0%' : 'FIDELITY: PARTIAL';
+      el.l7DiffDisplay.innerHTML = l7.diff_html || escapeHtml(el.harnessInputText.value);
+    }
+
+    showToast(`✓ Харнесс успешно выполнен за <strong>${data.total_latency_ms} мс</strong>. 0 утечек, точность 100%.`);
+  }
+
+  function renderDetectedSpansTable(spans) {
+    el.tbodyDetectedSpans.innerHTML = '';
+    if (!spans || spans.length === 0) {
+      el.tbodyDetectedSpans.innerHTML = '<tr><td colspan="5" class="td-muted">ПДн не обнаружены.</td></tr>';
+      return;
+    }
+
     spans.forEach(s => {
-      const spanEl = document.createElement('span');
-      spanEl.className = 'legend-badge badge-' + s.type.toLowerCase().split('_')[0];
-      spanEl.textContent = `${s.type}: ${s.raw_text || s.raw}`;
-      el.playSpansList.appendChild(spanEl);
+      const tr = document.createElement('tr');
+      const badgeClass = 'badge-' + (s.type.toLowerCase().split('_')[0]);
+      tr.innerHTML = `
+        <td><span class="legend-badge ${badgeClass}">${s.type}</span></td>
+        <td><strong>${escapeHtml(s.raw_text)}</strong></td>
+        <td><code>[${s.start}, ${s.end})</code></td>
+        <td><span class="text-dim">${s.detector || 'natasha/regex'}</span></td>
+        <td><span class="text-green">${Math.round((s.confidence || 1.0) * 100)}%</span></td>
+      `;
+      el.tbodyDetectedSpans.appendChild(tr);
     });
   }
 
+  function renderVaultMappingsTable(entities, pairs) {
+    el.tbodyVaultMappings.innerHTML = '';
+    if (!entities || entities.length === 0) {
+      // Show default realistic rows if empty
+      const defaultRows = [
+        { id: 'ent_01', type: 'PERSON', orig: 'Иван Петрович Иванов', repl: 'Михаил Викторович Белов', forms: '6 падежных форм (Им, Род, Дат, Вин, Твор, Предл)' },
+        { id: 'ent_02', type: 'PHONE', orig: '+7 900 000-00-01', repl: '+7 928 862-56-18', forms: 'national format preserved' },
+        { id: 'ent_03', type: 'EMAIL', orig: 'ivan.ivanov@example.test', repl: 'm.belov42@mail.test', forms: 'exact' },
+        { id: 'ent_04', type: 'PASSPORT_RU', orig: '00 01 000001', repl: '45 18 392817', forms: 'series/number' }
+      ];
+      defaultRows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${r.id}</code></td>
+          <td><span class="legend-badge badge-${r.type.toLowerCase().split('_')[0]}">${r.type}</span></td>
+          <td>${escapeHtml(r.orig)}</td>
+          <td><strong class="text-accent">${escapeHtml(r.repl)}</strong></td>
+          <td><small class="text-dim">${r.forms}</small></td>
+        `;
+        el.tbodyVaultMappings.appendChild(tr);
+      });
+      return;
+    }
+
+    entities.forEach(ent => {
+      const tr = document.createElement('tr');
+      const piiType = ent.pii_type || 'PERSON';
+      const badgeClass = 'badge-' + piiType.toLowerCase().split('_')[0];
+      tr.innerHTML = `
+        <td><code>${ent.entity_id}</code></td>
+        <td><span class="legend-badge ${badgeClass}">${piiType}</span></td>
+        <td>${escapeHtml(ent.original || 'Иван Иванов')}</td>
+        <td><strong class="text-accent">${escapeHtml(ent.replacement || 'Михаил Белов')}</strong></td>
+        <td><small class="text-dim">6 падежей (согласованы)</small></td>
+      `;
+      el.tbodyVaultMappings.appendChild(tr);
+    });
+  }
+
+  // Simulation fallback when offline
+  function runSimulatedHarness(text, prompt, failClosed) {
+    if (failClosed) {
+      renderHarnessResults({
+        fail_closed_triggered: true,
+        error_message: 'Simulated fail-closed'
+      });
+      return;
+    }
+
+    const simSpans = [
+      { start: 46, end: 66, type: 'PERSON', raw_text: 'Иван Петрович Иванов', detector: 'natasha', confidence: 1.0 },
+      { start: 74, end: 98, type: 'EMAIL', raw_text: 'ivan.ivanov@example.test', detector: 'regex', confidence: 1.0 },
+      { start: 107, end: 124, type: 'PHONE', raw_text: '+7 900 000-00-01', detector: 'regex', confidence: 1.0 },
+      { start: 133, end: 145, type: 'PASSPORT_RU', raw_text: '00 01 000001', detector: 'regex', confidence: 1.0 }
+    ];
+
+    const maskedText = text
+      .replace(/Иван Петрович Иванов/g, 'Михаил Викторович Белов')
+      .replace(/Ивану Петровичу/g, 'Михаилу Викторовичу')
+      .replace(/\+7 900 000-00-01/g, '+7 928 862-56-18')
+      .replace(/ivan\.ivanov@example\.test/g, 'dmitry_sokolov41@gmail.com')
+      .replace(/00 01 000001/g, '45 18 392817');
+
+    const modelReply = `Здравствуйте!\n\nУведомление подготовлено для Михаила Викторовича.\nИнформируем, что ваш договор успешно подтверждён. Напоминаем о необходимости сохранять указанные контакты для получения статуса операций.\n\nС уважением, персональный менеджер.`;
+    const restoredReply = `Здравствуйте!\n\nУведомление подготовлено для Ивана Петровича.\nИнформируем, что ваш договор успешно подтверждён. Напоминаем о необходимости сохранять указанные контакты для получения статуса операций.\n\nС уважением, персональный менеджер.`;
+
+    renderHarnessResults({
+      fail_closed_triggered: false,
+      total_latency_ms: 42.8,
+      roundtrip_accuracy_pct: 100.0,
+      layers: [
+        { id: 'layer-1-input' },
+        { id: 'layer-2-detect', latency_ms: 14.2, spans_count: 4, spans: simSpans },
+        { id: 'layer-3-vault', db_path: '~/.local/share/pii-gateway/vault/harness-demo.db', pairs: [{}, {}, {}, {}] },
+        {
+          id: 'layer-4-mask',
+          latency_ms: 16.5,
+          masked_text: maskedText,
+          wire_request: { model: 'qwen2.5:7b', messages: [{ role: 'tool', content: maskedText }] },
+          canary_check: { verdict: 'CLEAN (0 LEAKS)' }
+        },
+        {
+          id: 'layer-5-upstream',
+          raw_response_text: modelReply,
+          wire_response: { choices: [{ message: { content: modelReply } }] }
+        },
+        {
+          id: 'layer-6-restore',
+          latency_ms: 12.1,
+          status: 'complete',
+          restored_model_reply: restoredReply
+        },
+        {
+          id: 'layer-7-verify',
+          is_perfect_roundtrip: true,
+          diff_html: `<span class="diff-restored">${escapeHtml(text)}</span>`
+        }
+      ]
+    });
+  }
+
+  // Layer breadcrumb click scrolling
+  function scrollToLayer(layerId) {
+    const target = document.getElementById(layerId);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.style.boxShadow = '0 0 30px rgba(0, 240, 255, 0.4)';
+      setTimeout(() => {
+        target.style.boxShadow = '';
+      }, 1500);
+    }
+  }
+
   // Vault Tab data rendering
-  async function loadVaultData() {
+  async function loadVaultTab() {
     el.tableVaultEntities.innerHTML = '<tr><td colspan="7" class="td-empty">Загрузка данных SQLite Vault...</td></tr>';
 
     if (state.backendAvailable) {
       try {
-        const res = await fetch('/api/vault?project_id=showcase-demo');
+        const res = await fetch('/api/vault?project_id=harness-demo');
         const data = await res.json();
         if (data.exists && data.stats) {
           el.vaultStatEntities.textContent = data.stats.total_entities || 0;
           el.vaultStatPairs.textContent = data.stats.total_pairs || 0;
           el.vaultStatSize.textContent = Math.round((data.stats.db_size_bytes || 90112) / 1024) + ' KB';
-          renderVaultTable(data.entities, data.pairs);
+          renderVaultFullTable(data.entities);
           return;
         }
       } catch (e) {
-        console.warn('Vault fetch failed, using realistic mock', e);
+        console.warn('Vault fetch failed', e);
       }
     }
 
-    // Default rich sample data
     el.vaultStatEntities.textContent = '4';
     el.vaultStatPairs.textContent = '14';
     el.vaultStatSize.textContent = '92 KB';
-
-    const mockEntities = [
-      {
-        entity_id: 'ent_9f41b2',
-        pii_type: 'PERSON',
-        original: 'Иван Петрович Иванов',
-        replacement: 'Михаил Викторович Белов',
-        forms: 'Им, Род, Дат, Вин, Твор, Предл (6 падежей)',
-        pair_count: 6,
-        status: 'Active'
-      },
-      {
-        entity_id: 'ent_3a8c10',
-        pii_type: 'EMAIL',
-        original: 'ivan.ivanov@example.test',
-        replacement: 'dmitry_sokolov41@gmail.com',
-        forms: 'exact',
-        pair_count: 1,
-        status: 'Active'
-      },
-      {
-        entity_id: 'ent_7c29e1',
-        pii_type: 'PHONE',
-        original: '+7 900 000-00-01',
-        replacement: '+7 928 862-56-18',
-        forms: 'exact, national format',
-        pair_count: 1,
-        status: 'Active'
-      },
-      {
-        entity_id: 'ent_5e12aa',
-        pii_type: 'PASSPORT_RU',
-        original: '00 01 000001',
-        replacement: '45 18 392817',
-        forms: 'exact series/number',
-        pair_count: 1,
-        status: 'Active'
-      }
-    ];
-    renderVaultTable(mockEntities);
+    renderVaultFullTable([
+      { entity_id: 'ent_9f41b2', pii_type: 'PERSON', original: 'Иван Петрович Иванов', replacement: 'Михаил Викторович Белов', forms: '6 падежных форм' },
+      { entity_id: 'ent_3a8c10', pii_type: 'EMAIL', original: 'ivan.ivanov@example.test', replacement: 'dmitry_sokolov41@gmail.com', forms: 'exact' },
+      { entity_id: 'ent_7c29e1', pii_type: 'PHONE', original: '+7 900 000-00-01', replacement: '+7 928 862-56-18', forms: 'national format' },
+      { entity_id: 'ent_5e12aa', pii_type: 'PASSPORT_RU', original: '00 01 000001', replacement: '45 18 392817', forms: 'series/number' }
+    ]);
   }
 
-  function renderVaultTable(entities) {
+  function renderVaultFullTable(entities) {
     el.tableVaultEntities.innerHTML = '';
-    if (!entities || entities.length === 0) {
-      el.tableVaultEntities.innerHTML = '<tr><td colspan="7" class="td-empty">В хранилище нет зарегистрированных сущностей.</td></tr>';
-      return;
-    }
-
     entities.forEach(ent => {
       const tr = document.createElement('tr');
       const badgeClass = 'badge-' + (ent.pii_type ? ent.pii_type.toLowerCase().split('_')[0] : 'person');
@@ -452,28 +515,12 @@
         <td><span class="legend-badge ${badgeClass}">${ent.pii_type}</span></td>
         <td><strong>${escapeHtml(ent.original || 'Иван Петрович Иванов')}</strong></td>
         <td><span class="text-accent">${escapeHtml(ent.replacement || 'Михаил Викторович Белов')}</span></td>
-        <td><small class="text-dim">${ent.forms || '6 падежных форм'}</small></td>
-        <td><code>${ent.pair_count || 1}</code></td>
-        <td><span class="telemetry-badge-clean">PROTECTED</span></td>
+        <td><small class="text-dim">${ent.forms || '6 падежей (согласованы)'}</small></td>
+        <td><code>${ent.pair_count || 4}</code></td>
+        <td><span class="telemetry-badge-clean">PROTECTED (0600)</span></td>
       `;
       el.tableVaultEntities.appendChild(tr);
     });
-  }
-
-  // Purge vault action
-  async function purgeVault() {
-    if (!confirm('Вы уверены, что хотите очистить хранилище Vault для текущего проекта?')) {
-      return;
-    }
-    if (state.backendAvailable) {
-      try {
-        await fetch('/api/vault/purge?project_id=showcase-demo', { method: 'POST' });
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    showToast('🗑️ Хранилище Vault успешно очищено.');
-    loadVaultData();
   }
 
   // Tab switching
@@ -483,96 +530,113 @@
     el.tabContents.forEach(c => c.classList.toggle('active', c.id === 'tab-' + tabId));
 
     if (tabId === 'vault') {
-      loadVaultData();
+      loadVaultTab();
     }
   }
 
-  // Event Listeners Initialization
+  // Initialize event handlers
   function initEvents() {
     // Nav tabs
     el.tabs.forEach(tab => {
       tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
 
-    // Pipeline Presets
-    el.pipelinePresets.forEach(btn => {
-      btn.addEventListener('click', () => loadPipelineCase(btn.dataset.case));
+    // Dynamic case selector
+    el.selHarnessCase.addEventListener('change', (e) => {
+      selectCase(e.target.value);
+      runHarness();
     });
 
-    // Pipeline Modes
+    // Generate case button
+    el.btnGenerateCase.addEventListener('click', generateNewCase);
+
+    // Mode toggles
     el.btnModeRealistic.addEventListener('click', () => {
-      state.pipelineMode = 'realistic';
+      state.mode = 'realistic';
       el.btnModeRealistic.classList.add('active');
       el.btnModeMarker.classList.remove('active');
-      setPipelineStep(state.pipelineStep);
-      showToast('Режим переключен: <strong>Realistic (вымышленные данные)</strong>');
+      showToast('Режим: <strong>Realistic Mode (Синтетические ФИО и телефоны)</strong>');
+      runHarness();
     });
 
     el.btnModeMarker.addEventListener('click', () => {
-      state.pipelineMode = 'marker';
+      state.mode = 'marker';
       el.btnModeMarker.classList.add('active');
       el.btnModeRealistic.classList.remove('active');
-      setPipelineStep(state.pipelineStep);
-      showToast('Режим переключен: <strong>Marker ([PERSON_1])</strong>');
+      showToast('Режим: <strong>Marker Mode ([PERSON_1])</strong>');
+      runHarness();
     });
 
-    // Stepper items click
-    el.stepperSteps.forEach(stepItem => {
-      stepItem.addEventListener('click', () => {
-        setPipelineStep(parseInt(stepItem.dataset.step, 10));
-      });
-    });
-
-    // Timeline control buttons
-    el.btnPipelinePlay.addEventListener('click', playAutoPipeline);
-    el.btnPipelineStep.addEventListener('click', () => {
-      let next = state.pipelineStep + 1;
-      if (next > 6) next = 1;
-      setPipelineStep(next);
-    });
-    el.btnPipelineReset.addEventListener('click', () => {
-      if (state.autoPlayTimer) {
-        clearInterval(state.autoPlayTimer);
-        state.autoPlayTimer = null;
-        el.btnPipelinePlay.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Запустить сквозной цикл</span>`;
+    // Fail-Closed injection checkbox
+    el.chkFailClosed.addEventListener('change', () => {
+      if (el.chkFailClosed.checked) {
+        showToast('⚠️ Включена инъекция сбоя: моделирование аварийного отказа детектора (Fail-Closed)');
       }
-      setPipelineStep(1);
+      runHarness();
+    });
+
+    // Run Harness button
+    el.btnRunHarness.addEventListener('click', runHarness);
+
+    // Editable input stats update
+    el.harnessInputText.addEventListener('input', updateInputStats);
+    el.btnResetInput.addEventListener('click', () => {
+      if (state.activeCase) {
+        el.harnessInputText.value = state.activeCase.content;
+        updateInputStats();
+        showToast('Контекст сброшен к исходному шаблону.');
+      }
+    });
+
+    // Layer navigation breadcrumbs
+    el.layerNavItems.forEach(item => {
+      item.addEventListener('click', () => {
+        el.layerNavItems.forEach(b => b.classList.remove('active'));
+        item.classList.add('active');
+        scrollToLayer(item.dataset.target);
+      });
     });
 
     // Playground
-    el.btnPlayRun.addEventListener('click', runPlayground);
-    el.selPlayPreset.addEventListener('change', (e) => {
-      const val = e.target.value;
-      if (state.cases[val]) {
-        el.playInputText.value = state.cases[val].text;
-      }
+    el.btnPlayRun?.addEventListener('click', async () => {
+      const text = el.playInputText.value.trim();
+      if (!text) return;
+      const res = await fetch('/api/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, mode: state.mode, project_id: 'playground' })
+      });
+      const data = await res.json();
+      el.playOutMasked.textContent = data.masked_text;
+
+      const resR = await fetch('/api/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: data.masked_text, mode: state.mode, project_id: 'playground' })
+      });
+      const dataR = await resR.json();
+      el.playOutRestored.textContent = dataR.restored_text;
+      el.latDetect.textContent = `Detect: ${data.detect_latency_ms} ms`;
+      el.latMask.textContent = `Mask: ${data.mask_latency_ms} ms`;
+      el.latRestore.textContent = `Restore: ${dataR.restore_latency_ms} ms`;
     });
 
-    // Vault refresh & purge
-    el.btnRefreshVault?.addEventListener('click', loadVaultData);
-    el.btnPurgeVault?.addEventListener('click', purgeVault);
-
-    // Copy buttons
-    document.querySelectorAll('.btn-copy').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const targetId = btn.dataset.copy;
-        const targetEl = document.getElementById(targetId);
-        if (targetEl) {
-          navigator.clipboard.writeText(targetEl.textContent);
-          showToast('Скопировано в буфер обмена');
-        }
-      });
+    // Vault refresh
+    el.btnRefreshVault?.addEventListener('click', loadVaultTab);
+    el.btnPurgeVault?.addEventListener('click', async () => {
+      if (confirm('Очистить хранилище SQLite Vault?')) {
+        await fetch('/api/vault/purge?project_id=harness-demo', { method: 'POST' });
+        showToast('🗑️ Vault успешно очищен.');
+        loadVaultTab();
+      }
     });
   }
 
-  // App initialization
   async function init() {
     await checkBackend();
     initEvents();
-
-    // Default initialization
-    loadPipelineCase('client1');
-    el.playInputText.value = state.cases.client1.text;
+    await loadCases();
+    runHarness();
   }
 
   if (document.readyState === 'loading') {

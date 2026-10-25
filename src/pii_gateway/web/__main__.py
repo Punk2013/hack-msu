@@ -44,9 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_browser:
         open_browser_delayed(url)
 
-    from pii_gateway.web.server import app
-
-    uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run("pii_gateway.web.server:app", host=args.host, port=args.port, reload=args.reload)
     return 0
 
 
