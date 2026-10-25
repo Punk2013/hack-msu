@@ -62,7 +62,7 @@ class EntityRecord:
 class SurfaceRecord:
     surface_id: str
     entity_id: str
-    side: str  # 'original' or 'pseudo'
+    side: str  # 'original', 'pseudo', or 'canonical'
     form: str | None
     text: str
     raw_hash: str | None
@@ -82,10 +82,11 @@ class Vault:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(
                 str(self.db_path),
-                timeout=15.0,
+                timeout=30.0,
                 isolation_level="DEFERRED",
             )
             self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA busy_timeout = 30000;")
             if os.name != "nt" and self.db_path.exists():
                 try:
                     self.db_path.chmod(0o600)
@@ -119,6 +120,8 @@ class Vault:
                     FOREIGN KEY (entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
                 );
 
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_surfaces
+                    ON surfaces(entity_id, side, text, COALESCE(form, ''));
                 CREATE INDEX IF NOT EXISTS idx_surfaces_lookup ON surfaces(side, text);
                 CREATE INDEX IF NOT EXISTS idx_surfaces_entity ON surfaces(entity_id);
 
@@ -131,12 +134,17 @@ class Vault:
                     FOREIGN KEY (entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
                 );
 
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_mentions
+                    ON mentions(entity_id, source_id, start_idx, end_idx);
+
                 CREATE TABLE IF NOT EXISTS markers (
                     marker_text TEXT PRIMARY KEY,
                     entity_id TEXT NOT NULL,
                     pii_type TEXT NOT NULL,
                     FOREIGN KEY (entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_markers_entity ON markers(entity_id);
 
                 CREATE TABLE IF NOT EXISTS counters (
                     pii_type TEXT PRIMARY KEY,
@@ -180,20 +188,29 @@ class Vault:
         type_str = str(pii_type)
         conn = self._get_connection()
         with conn:
+            # Atomic upsert with RETURNING guarantees no race condition across threads/connections
             row = conn.execute(
-                "SELECT next_val FROM counters WHERE pii_type = ?", (type_str,)
+                """
+                INSERT INTO counters (pii_type, next_val) VALUES (?, 1)
+                ON CONFLICT(pii_type) DO UPDATE SET next_val = counters.next_val + 1
+                RETURNING next_val;
+                """,
+                (type_str,),
             ).fetchone()
-            if row is None:
-                next_val = 1
-                conn.execute(
-                    "INSERT INTO counters(pii_type, next_val) VALUES (?, 2)", (type_str,)
-                )
-            else:
-                next_val = int(row["next_val"])
-                conn.execute(
-                    "UPDATE counters SET next_val = next_val + 1 WHERE pii_type = ?", (type_str,)
-                )
-            return next_val
+            return int(row[0])
+
+    def reserve_marker_index_at_least(self, pii_type: str | PiiType, last_taken: int) -> None:
+        """Ensure counter for pii_type has recorded last_taken as already used."""
+        type_str = str(pii_type)
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO counters (pii_type, next_val) VALUES (?, ?)
+                ON CONFLICT(pii_type) DO UPDATE SET next_val = MAX(counters.next_val, ?)
+                """,
+                (type_str, last_taken, last_taken),
+            )
 
     def add_entity(
         self,
@@ -213,7 +230,9 @@ class Vault:
         with conn:
             conn.execute(
                 """
-                INSERT INTO entities(entity_id, project_id, pii_type, is_ambiguous, created_at)
+                INSERT OR IGNORE INTO entities(
+                    entity_id, project_id, pii_type, is_ambiguous, created_at
+                )
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
@@ -235,23 +254,27 @@ class Vault:
         form: str | None = None,
         raw_hash: str | None = None,
     ) -> None:
+        """Store a surface mapping idempotently."""
         conn = self._get_connection()
         with conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO surfaces(surface_id, entity_id, side, form, text, raw_hash)
+                INSERT INTO surfaces(surface_id, entity_id, side, form, text, raw_hash)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(entity_id, side, text, COALESCE(form, '')) DO NOTHING
                 """,
                 (surface_id, entity_id, side, form, text, raw_hash),
             )
 
     def add_marker(self, marker_text: str, entity_id: str, pii_type: PiiType) -> None:
+        """Store a marker mapping idempotently without overwriting."""
         conn = self._get_connection()
         with conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO markers(marker_text, entity_id, pii_type)
+                INSERT INTO markers(marker_text, entity_id, pii_type)
                 VALUES (?, ?, ?)
+                ON CONFLICT(marker_text) DO NOTHING
                 """,
                 (marker_text, entity_id, str(pii_type)),
             )
@@ -264,12 +287,14 @@ class Vault:
         start_idx: int,
         end_idx: int,
     ) -> None:
+        """Store a mention occurrence idempotently."""
         conn = self._get_connection()
         with conn:
             conn.execute(
                 """
                 INSERT INTO mentions(mention_id, entity_id, source_id, start_idx, end_idx)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(entity_id, source_id, start_idx, end_idx) DO NOTHING
                 """,
                 (mention_id, entity_id, source_id, start_idx, end_idx),
             )
@@ -277,14 +302,14 @@ class Vault:
     def find_entity_by_original_text(
         self, text: str, pii_type: PiiType | None = None
     ) -> EntityRecord | None:
-        """Find an existing entity by exact matching original surface text."""
+        """Find an existing entity by exact matching original or canonical surface text."""
         conn = self._get_connection()
         if pii_type is not None:
             query = """
                 SELECT e.entity_id, e.project_id, e.pii_type, e.is_ambiguous, e.created_at
                 FROM entities e
                 JOIN surfaces s ON s.entity_id = e.entity_id
-                WHERE s.side = 'original' AND s.text = ? AND e.pii_type = ?
+                WHERE s.side IN ('original', 'canonical') AND s.text = ? AND e.pii_type = ?
                 LIMIT 1
             """
             row = conn.execute(query, (text, str(pii_type))).fetchone()
@@ -293,7 +318,7 @@ class Vault:
                 SELECT e.entity_id, e.project_id, e.pii_type, e.is_ambiguous, e.created_at
                 FROM entities e
                 JOIN surfaces s ON s.entity_id = e.entity_id
-                WHERE s.side = 'original' AND s.text = ?
+                WHERE s.side IN ('original', 'canonical') AND s.text = ?
                 LIMIT 1
             """
             row = conn.execute(query, (text,)).fetchone()
@@ -315,8 +340,8 @@ class Vault:
             SELECT s.text
             FROM surfaces s
             JOIN markers m ON m.entity_id = s.entity_id
-            WHERE m.marker_text = ? AND s.side = 'original'
-            ORDER BY s.rowid ASC
+            WHERE m.marker_text = ? AND s.side IN ('original', 'canonical')
+            ORDER BY CASE WHEN s.side = 'original' THEN 0 ELSE 1 END, s.rowid ASC
             LIMIT 1
         """
         row = conn.execute(query, (marker_text,)).fetchone()
@@ -331,17 +356,22 @@ class Vault:
         return str(row["marker_text"]) if row else None
 
     def get_all_marker_mappings(self) -> dict[str, str]:
-        """Return a dictionary of {marker_text: original_text} for this project."""
+        """Return a dictionary of {marker_text: canonical_original_text} for this project."""
         conn = self._get_connection()
         query = """
-            SELECT m.marker_text, s.text as orig_text
+            SELECT m.marker_text,
+                   (SELECT s.text FROM surfaces s
+                    WHERE s.entity_id = m.entity_id AND s.side IN ('original', 'canonical')
+                    ORDER BY CASE WHEN s.side = 'original' THEN 0 ELSE 1 END, s.rowid ASC
+                    LIMIT 1) as orig_text
             FROM markers m
-            JOIN surfaces s ON s.entity_id = m.entity_id
-            WHERE s.side = 'original'
-            GROUP BY m.marker_text
         """
         rows = conn.execute(query).fetchall()
-        return {str(r["marker_text"]): str(r["orig_text"]) for r in rows}
+        return {
+            str(r["marker_text"]): str(r["orig_text"])
+            for r in rows
+            if r["orig_text"] is not None
+        }
 
     def get_all_pseudo_mappings(self) -> list[tuple[str, str, str | None]]:
         """Return list of (pseudo_text, original_text, form) sorted by descending pseudo length."""
@@ -359,3 +389,18 @@ class Vault:
         ]
         result.sort(key=lambda t: len(t[0]), reverse=True)
         return result
+
+    def get_all_used_pseudonyms(self) -> set[str]:
+        """Return set of all pseudonym texts allocated in this project."""
+        conn = self._get_connection()
+        rows = conn.execute("SELECT text FROM surfaces WHERE side = 'pseudo'").fetchall()
+        return {str(r["text"]) for r in rows}
+
+    def count_rows(self) -> dict[str, int]:
+        """Diagnostic count of rows in all tables."""
+        conn = self._get_connection()
+        counts = {}
+        for table in ("entities", "surfaces", "mentions", "markers", "counters"):
+            c = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            counts[table] = int(c)
+        return counts

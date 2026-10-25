@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from pii_gateway.pseudo.morphology import (
     decline_surname,
     generate_realistic_pair,
 )
+from pii_gateway.vault import Vault
 
 
 @pytest.fixture(autouse=True)
@@ -78,8 +80,35 @@ def test_unknown_marker_returns_partial_status():
     assert restored.text == text
 
 
-def test_namesakes_in_same_document():
-    ctx = Context(project_id="test_namesakes", mode="marker")
+def test_corrupted_markers_return_partial_status():
+    ctx = Context(project_id="test_corrupt", mode="marker")
+    # Missing closing bracket
+    r1 = restore("Текст [PERSON_1 далее", ctx)
+    assert r1.status == RestoreStatus.PARTIAL
+    assert len(r1.unresolved) == 1
+    assert r1.unresolved[0].reason == "unknown_marker"
+
+    # Non-numeric index
+    r2 = restore("Текст [PERSON_x] далее", ctx)
+    assert r2.status == RestoreStatus.PARTIAL
+    assert len(r2.unresolved) == 1
+    assert r2.unresolved[0].reason == "unknown_marker"
+
+    # Trailing space inside bracket
+    r3 = restore("Текст [PERSON_1 ] далее", ctx)
+    assert r3.status == RestoreStatus.PARTIAL
+    assert len(r3.unresolved) == 1
+    assert r3.unresolved[0].reason == "unknown_marker"
+
+    # Incomplete tag without index
+    r4 = restore("Текст [PERSON] далее", ctx)
+    assert r4.status == RestoreStatus.PARTIAL
+    assert len(r4.unresolved) == 1
+    assert r4.unresolved[0].reason == "unknown_marker"
+
+
+def test_identical_full_name_reuses_entity_and_is_idempotent():
+    ctx = Context(project_id="test_same_name", mode="marker")
     text = "Запись A: Иван Иванов, a@example.test. Запись B: Иван Иванов, b@example.test."
     spans = [
         EntitySpan(10, 21, PiiType.PERSON, "Иван Иванов", detector="test"),
@@ -88,31 +117,86 @@ def test_namesakes_in_same_document():
         EntitySpan(62, 76, PiiType.EMAIL, "b@example.test", detector="test"),
     ]
 
-    masked = mask(text, spans, ctx)
-    assert "[PERSON_1]" in masked.text
-    assert "[PERSON_2]" in masked.text
+    masked1 = mask(text, spans, ctx)
+    assert masked1.text == "Запись A: [PERSON_1], [EMAIL_1]. Запись B: [PERSON_1], [EMAIL_2]."
 
-    restored = restore(masked.text, ctx)
-    assert restored.text == text
-    assert restored.status == RestoreStatus.COMPLETE
+    vault = Vault(ctx.project_id)
+    counts1 = vault.count_rows()
+
+    # Replay on the next turn with identical history: must be 100% idempotent
+    masked2 = mask(text, spans, ctx)
+    assert masked2.text == masked1.text
+
+    counts2 = vault.count_rows()
+    assert counts1 == counts2, "Vault must not grow when replaying same history"
 
 
-def test_repeated_mention_with_case_inflection():
-    ctx = Context(project_id="test_repeat", mode="marker")
-    text = "Иван Иванов подписал. Ивану Иванову отправили копию."
+def test_repeated_mention_across_different_calls_and_inflections():
+    ctx = Context(project_id="test_cross_call", mode="marker")
+
+    # Call 1: Nominative form
+    t1 = "Менеджер Иван Петрович Иванов."
+    s1 = [EntitySpan(9, 29, PiiType.PERSON, "Иван Петрович Иванов", detector="test")]
+    m1 = mask(t1, s1, ctx)
+    assert m1.text == "Менеджер [PERSON_1]."
+
+    # Call 2: Inflected form in a different field/call
+    t2 = "Ивану Петровичу Иванову отправить копию."
+    s2 = [EntitySpan(0, 23, PiiType.PERSON, "Ивану Петровичу Иванову", detector="test")]
+    m2 = mask(t2, s2, ctx)
+    # Must link to the same entity and receive [PERSON_1]!
+    assert m2.text == "[PERSON_1] отправить копию."
+
+    # Call 3: Replay both
+    m1_replay = mask(t1, s1, ctx)
+    m2_replay = mask(t2, s2, ctx)
+    assert m1_replay.text == "Менеджер [PERSON_1]."
+    assert m2_replay.text == "[PERSON_1] отправить копию."
+
+
+def test_repeated_identical_email_gets_same_marker():
+    ctx = Context(project_id="test_repeat_email", mode="marker")
+    text = "Писать на a@example.test и копию на a@example.test"
     spans = [
-        EntitySpan(0, 11, PiiType.PERSON, "Иван Иванов", detector="test"),
-        EntitySpan(22, 35, PiiType.PERSON, "Ивану Иванову", detector="test"),
+        EntitySpan(10, 24, PiiType.EMAIL, "a@example.test", detector="test"),
+        EntitySpan(36, 50, PiiType.EMAIL, "a@example.test", detector="test"),
     ]
 
     masked = mask(text, spans, ctx)
-    assert masked.text == "[PERSON_1] подписал. [PERSON_1] отправили копию."
+    assert masked.text == "Писать на [EMAIL_1] и копию на [EMAIL_1]"
+
+
+def test_literal_marker_in_original_text_does_not_collide():
+    ctx = Context(project_id="test_literal", mode="marker")
+    text = "Literal [PERSON_1]; Иван Иванов"
+    spans = [
+        EntitySpan(20, 31, PiiType.PERSON, "Иван Иванов", detector="test"),
+    ]
+
+    masked = mask(text, spans, ctx)
+    # Since [PERSON_1] was in the original text, the new entity must receive [PERSON_2]
+    assert masked.text == "Literal [PERSON_1]; [PERSON_2]"
 
     restored = restore(masked.text, ctx)
-    # In marker mode, [PERSON_1] restores to the canonical surface representation,
-    # whereas realistic mode preserves grammatical case inflection.
-    assert restored.text == "Иван Иванов подписал. Иван Иванов отправили копию."
-    assert restored.status == RestoreStatus.COMPLETE
+    # [PERSON_2] unmasks to Иван Иванов, while literal [PERSON_1] was not created by the gateway
+    # so it is returned unresolved/partial without corrupting user literal text!
+    assert "Иван Иванов" in restored.text
+    assert restored.status == RestoreStatus.PARTIAL
+
+
+def test_partial_single_mention_linking():
+    ctx = Context(project_id="test_partial_single", mode="marker")
+    text = "Подписал Иван Иванов. Передать Иванову."
+    spans = [
+        EntitySpan(9, 20, PiiType.PERSON, "Иван Иванов", detector="test"),
+        EntitySpan(31, 38, PiiType.PERSON, "Иванову", detector="test"),
+    ]
+
+    masked = mask(text, spans, ctx)
+    # Single surname in document links to the sole full candidate
+    assert masked.replacements[1].linked_by == "partial_single"
+    assert masked.replacements[1].entity_id == masked.replacements[0].entity_id
+    assert masked.text == "Подписал [PERSON_1]. Передать [PERSON_1]."
 
 
 def test_realistic_mode_morphology_and_cases():
@@ -133,6 +217,32 @@ def test_realistic_mode_morphology_and_cases():
     assert restored.status == RestoreStatus.COMPLETE
 
 
+def test_realistic_pool_collision_handling():
+    ctx = Context(project_id="test_pool_collision", mode="realistic")
+    names = [
+        "Иван Иванов",
+        "Иван Петров",
+        "Иван Сидоров",
+        "Иван Волков",
+        "Иван Орлов",
+        "Иван Соколов",
+    ]
+    all_masked = []
+    for name in names:
+        span = EntitySpan(0, len(name), PiiType.PERSON, name, detector="test")
+        res = mask(name, [span], ctx)
+        all_masked.append(res.text)
+
+    # Every masked representation must be distinct (no duplicate pseudonyms across distinct people)
+    assert len(set(all_masked)) == len(names)
+
+    # Restoring each individually must return the exact original person without cross-contamination
+    for original, masked_str in zip(names, all_masked, strict=True):
+        rest = restore(masked_str, ctx)
+        assert rest.status == RestoreStatus.COMPLETE
+        assert rest.text == original
+
+
 def test_counterexample_sasha_shevchenko_bijection_fallback():
     pair = generate_realistic_pair(
         "Иван Иванов", "ent_123", target_pseudo_override=("Саша", "Шевченко")
@@ -147,3 +257,22 @@ def test_counterexample_sasha_shevchenko_bijection_fallback():
     shevchenko_decline = decline_surname("Шевченко", "masc")
     assert shevchenko_decline["nomn"] == "Шевченко"
     assert shevchenko_decline["ablt"] == "Шевченко"
+
+
+def test_vault_concurrent_counter_atomicity(tmp_path: Path):
+    db_file = tmp_path / "concurrent.db"
+    # Pre-initialize schema so worker threads only perform atomic counter increments
+    with Vault("concurrent_test", db_path=db_file):
+        pass
+
+    def increment_counter():
+        with Vault("concurrent_test", db_path=db_file) as v:
+            return v.get_next_marker_index(PiiType.PERSON)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(increment_counter) for _ in range(50)]
+        results = [f.result() for f in futures]
+
+    # All 50 increments must be unique and span 1..50
+    assert len(set(results)) == 50
+    assert sorted(results) == list(range(1, 51))
