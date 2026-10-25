@@ -107,3 +107,18 @@ def test_projects_are_isolated():
     spans = spans_for(text, ("Иван Петрович Иванов", PiiType.PERSON))
     masked = mask(text, spans, Context("p1")).text
     assert restore(masked, Context("p2")).text == masked
+
+
+def test_model_reorders_name_or_uses_initials_or_surname_only():
+    ctx = Context("variants")
+    a = "Клиент: Иван Петрович Иванов."
+    masked = mask(a, spans_for(a, ("Иван Петрович Иванов", PiiType.PERSON)), ctx).text
+    first, patr, last = masked.removeprefix("Клиент: ").removesuffix(".").split()
+    probes = {
+        f"{last} {first} {patr}": "Иванов Иван Петрович",
+        f"{last} {first[0]}. {patr[0]}.": "Иванов И. П.",
+        f"{first[0]}. {patr[0]}. {last}": "И. П. Иванов",
+        f"Господин {last}": "Господин Иванов",
+    }
+    for probe, expected in probes.items():
+        assert restore(probe, ctx).text == expected, probe

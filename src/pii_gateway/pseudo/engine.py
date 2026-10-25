@@ -214,6 +214,7 @@ def _person_pairs(
     """{fake_form: original_form} for all cases of this mention, or None if unsafe."""
     words = raw.split()
     pairs: dict[str, str] = {}
+    extra: dict[str, str] = {}
     for case in CASES:
         orig, fake = [], []
         for token, word in zip(name.tokens, words, strict=True):
@@ -233,7 +234,31 @@ def _person_pairs(
         if f_text == o_text or vault.is_known_original(f_text) or known not in (None, o_text):
             return None
         pairs[f_text] = o_text
-    return pairs
+        roles = [t.role for t in name.tokens]
+        for f_var, o_var in _variants(roles, fake, orig):
+            if f_var in pairs or extra.get(f_var, o_var) != o_var:
+                extra[f_var] = ""  # ambiguous variant: never restore it
+            elif vault.get_pair(f_var) in (None, o_var) and not vault.is_known_original(f_var):
+                extra[f_var] = o_var
+    return pairs | {f: o for f, o in extra.items() if o and f not in pairs}
+
+
+def _variants(roles: list[str], fake: list[str], orig: list[str]) -> list[tuple[str, str]]:
+    """Other ways the model may write the same name: word order, initials, surname alone."""
+    if "Surn" not in roles or len(roles) < 2:
+        return []
+    by_role_f = dict(zip(roles, fake, strict=True))
+    by_role_o = dict(zip(roles, orig, strict=True))
+    given = [r for r in ("Name", "Patr") if r in roles]
+    out = []
+    for order in (["Surn", *given], [*given, "Surn"]):
+        out.append((" ".join(by_role_f[r] for r in order), " ".join(by_role_o[r] for r in order)))
+    f_init = " ".join(by_role_f[r][0] + "." for r in given)
+    o_init = " ".join(by_role_o[r][0] + "." for r in given)
+    out.append((f"{by_role_f['Surn']} {f_init}", f"{by_role_o['Surn']} {o_init}"))
+    out.append((f"{f_init} {by_role_f['Surn']}", f"{o_init} {by_role_o['Surn']}"))
+    out.append((by_role_f["Surn"], by_role_o["Surn"]))
+    return out
 
 
 def _normalize(kind: PiiType, raw: str) -> str:
