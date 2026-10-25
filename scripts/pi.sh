@@ -104,4 +104,7 @@ cat >"$PI_CODING_AGENT_DIR/models.json" <<JSON
 JSON
 export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
 
-"$PI_BIN" --provider pii-gateway --model "$model" --tools read,edit,write,grep,find,ls "$@"
+# provider credentials stay with the gateway: pi never inherits them
+env -u PII_UPSTREAM_API_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u DEEPSEEK_API_KEY \
+  -u ANTHROPIC_API_KEY -u GEMINI_API_KEY \
+  "$PI_BIN" --provider pii-gateway --model "$model" --tools read,edit,write,grep,find,ls "$@"
