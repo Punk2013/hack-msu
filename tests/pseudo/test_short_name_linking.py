@@ -74,3 +74,19 @@ def test_replay_is_stable():
     text = "Игорь Олегович пришёл на встречу. Игорь попросил прислать акт."
     spans = persons(text, "Игорь Олегович", "Игорь")
     assert len({mask(text, spans, ctx).text for _ in range(3)}) == 1
+
+
+def test_fake_never_reuses_a_real_name_part(monkeypatch):
+    # review of #50: the pool contains "Соколов", so a real Соколов kept his surname
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    from pii_gateway.pseudo import engine
+
+    seed = "749c5ccf8b9b" + "0" * 20
+    monkeypatch.setattr(engine, "uuid", SimpleNamespace(uuid4=lambda: UUID(hex=seed)))
+    ctx = Context("own-surname")
+    text = "Алексей Дмитриевич Соколов"
+    result = mask(text, persons(text, text), ctx)
+    assert not set(result.text.split()) & set(text.split())
+    assert mask(text, persons(text, text), ctx).text == result.text

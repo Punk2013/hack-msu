@@ -152,7 +152,9 @@ class _Name:
     case: str  # nomn | gent | ...
 
     def key(self, roles: tuple[str, ...]) -> str:
-        parts = [f"{t.role}:{t.normal}" for t in self.tokens if t.role in roles]
+        # canonical role order: "Иванов Игорь Олегович" and "Игорь Олегович Иванов" are one key
+        by_role = {t.role: t.normal for t in self.tokens}
+        parts = [f"{r}:{by_role[r]}" for r in ROLES if r in roles and r in by_role]
         return f"PERSON|{self.gender}|{'|'.join(parts)}"
 
 
@@ -232,6 +234,8 @@ def _person_pairs(
         for token, word in zip(name.tokens, words, strict=True):
             o = _inflect(token.parse, case, name.gender, word)
             pp = _pseudo_parse(token.role, name.gender, entity_id, attempt)
+            if pp is not None and pp.normal_form == token.parse.normal_form:
+                return None  # fake part equals the real one ("Соколов" → "Соколов"): a leak
             f = _inflect(pp, case, name.gender, word) if pp is not None else None
             if o is None or f is None:
                 return None
@@ -251,6 +255,8 @@ def _person_pairs(
         pairs[f_text] = o_text
         roles = [t.role for t in name.tokens]
         for f_var, o_var in _variants(roles, fake, orig):
+            if f_var == o_var:
+                return None
             if f_var in pairs or extra.get(f_var, o_var) != o_var:
                 extra[f_var] = ""  # ambiguous within this person: never restore it
             elif vault.is_known_original(f_var):
@@ -330,9 +336,10 @@ def _marker(vault: Vault, kind: PiiType, entity_id: str, raw: str) -> str:
     return marker
 
 
-def _replace_one(
-    vault: Vault, span: EntitySpan, ctx: Context, link_to: str | None = None
-) -> tuple[str, Replacement]:
+def _resolve_span(
+    vault: Vault, span: EntitySpan, link_to: str | None = None, ambiguous: bool = False
+) -> tuple[_Name | None, str, str]:
+    """(name analysis, entity_id, linked_by) for one mention."""
     raw, kind = span.raw_text, span.type
     name = _analyze_name(raw) if kind is PiiType.PERSON else None
     if name is not None:
@@ -349,68 +356,123 @@ def _replace_one(
         is_partial = False
         keys = [f"{kind}|{_normalize(kind, raw)}"]
     if link_to is not None:
-        entity_id, linked_by = link_to, "partial_single"
-    else:
-        entity_id, linked_by = _resolve_entity(vault, kind, keys, is_partial=is_partial)
-    rep = Replacement(span.start, span.end, entity_id, linked_by, name.case if name else None)
+        return name, link_to, "partial_single"
+    if ambiguous:  # bare first name with several matching people in this text
+        key = f"ambiguous-short|{keys[0]}"
+        found, entity_id = vault.get_key(key)
+        if not (found and entity_id):
+            entity_id = f"ent_{uuid.uuid4().hex[:12]}"
+            vault.add_entity(entity_id, kind, is_ambiguous=True)
+            vault.add_key(key, entity_id)
+        return name, entity_id, "new"
+    entity_id, linked_by = _resolve_entity(vault, kind, keys, is_partial=is_partial)
+    return name, entity_id, linked_by
 
+
+def _render(
+    vault: Vault, ctx: Context, entity_id: str, mentions: list[tuple[EntitySpan, _Name | None]]
+) -> list[str]:
+    """Replacement for every mention of one entity in this text, chosen together.
+
+    All mentions share one pseudonym attempt, so "Игорь Олегович … Игорь" stays
+    "Дмитрий Романович … Дмитрий" even when a single form would collide (issue #48).
+    """
+    kind = mentions[0][0].type
     if ctx.mode == "realistic":
         for attempt in range(MAX_ATTEMPTS):
-            if name is not None:
-                pairs = _person_pairs(name, raw, entity_id, attempt, vault)
-                if pairs is None:
-                    continue
-                for fake, orig in pairs.items():
-                    vault.add_pair(fake, orig, entity_id)
-                return next(f for f, o in pairs.items() if o == raw), rep
-            fake = fake_value(kind, raw, entity_id, attempt)
-            if fake is None:
-                break
-            if vault.is_known_original(fake) or vault.get_pair(fake) not in (None, raw):
+            if all(name is not None for _, name in mentions):
+                merged: dict[str, str] = {}
+                values = []
+                for span, name in mentions:
+                    pairs = _person_pairs(name, span.raw_text, entity_id, attempt, vault)
+                    if pairs is None or any(merged.get(f, o) != o for f, o in pairs.items()):
+                        break
+                    merged.update(pairs)
+                    values.append(next(f for f, o in pairs.items() if o == span.raw_text))
+                else:
+                    for fake, orig in merged.items():
+                        vault.add_pair(fake, orig, entity_id)
+                    return values
                 continue
-            vault.add_pair(fake, raw, entity_id)
-            return fake, rep
-    return _marker(vault, kind, entity_id, raw), rep
+            if kind is PiiType.PERSON:
+                break  # a name we cannot inflect: markers for all its mentions
+            values = []
+            for span, _ in mentions:
+                fake = fake_value(kind, span.raw_text, entity_id, attempt)
+                if fake is None or vault.is_known_original(fake) or vault.get_pair(fake) not in (
+                    None,
+                    span.raw_text,
+                ):
+                    break
+                values.append(fake)
+            else:
+                for fake, (span, _) in zip(values, mentions, strict=True):
+                    vault.add_pair(fake, span.raw_text, entity_id)
+                return values
+            if fake_value(kind, mentions[0][0].raw_text, entity_id, attempt) is None:
+                break
+    return [_marker(vault, kind, entity_id, span.raw_text) for span, _ in mentions]
 
 
-def _first_name(span: EntitySpan) -> tuple[_Name, str] | None:
-    """(analysis, name lemma) for a PERSON mention that contains a first name."""
-    if span.type is not PiiType.PERSON:
-        return None
-    name = _analyze_name(span.raw_text)
+def _first_name(name: _Name | None) -> str | None:
     if name is None:
         return None
-    lemma = next((t.normal for t in name.tokens if t.role == "Name"), None)
-    return (name, lemma) if lemma else None
+    return next((t.normal for t in name.tokens if t.role == "Name"), None)
 
 
 def _plan(vault: Vault, spans: list[EntitySpan], ctx: Context) -> list[tuple[str, Replacement]]:
-    """Replace longer mentions first, then link a bare first name to them (issue #48).
+    """Resolve fuller mentions first, link bare first names, then render per entity.
 
     Scope is the text being masked (one message or tool result), never the whole vault:
-    "Игорь" joins "Игорь Олегович" only if exactly one such person is in this text.
+    "Игорь" joins "Игорь Олегович" only if exactly one such person is in this text;
+    with several candidates it becomes a separate entity marked ambiguous (issue #48).
     """
-    names = {i: _first_name(span) for i, span in enumerate(spans)}
-    bare = {
-        i for i, info in names.items() if info is not None and len(info[0].tokens) == 1
+    analyses = {
+        i: _analyze_name(span.raw_text) if span.type is PiiType.PERSON else None
+        for i, span in enumerate(spans)
     }
-    planned: dict[int, tuple[str, Replacement]] = {}
-    for i, span in enumerate(spans):
-        if i not in bare:
-            planned[i] = _replace_one(vault, span, ctx)
+    bare = {
+        i for i, name in analyses.items()
+        if name is not None and len(name.tokens) == 1 and name.tokens[0].role == "Name"
+    }
+    resolved: dict[int, tuple[_Name | None, str, str]] = {}
+    fuller_first = sorted(
+        (i for i in range(len(spans)) if i not in bare),
+        key=lambda i: (-(len(analyses[i].tokens) if analyses[i] else 0), i),
+    )
+    for i in fuller_first:
+        resolved[i] = _resolve_span(vault, spans[i])
     for i in sorted(bare):
-        name, lemma = names[i]
+        name = analyses[i]
         owners = {
-            planned[j][1].entity_id
-            for j, info in names.items()
-            if j not in bare
-            and info is not None
-            and info[1] == lemma
-            and info[0].gender == name.gender
+            resolved[j][1]
+            for j in resolved
+            if analyses[j] is not None
+            and _first_name(analyses[j]) == _first_name(name)
+            and analyses[j].gender == name.gender
         }
-        link = owners.pop() if len(owners) == 1 else None
-        planned[i] = _replace_one(vault, spans[i], ctx, link_to=link)
-    return [planned[i] for i in range(len(spans))]
+        if len(owners) == 1:
+            resolved[i] = _resolve_span(vault, spans[i], link_to=owners.pop())
+        else:
+            resolved[i] = _resolve_span(vault, spans[i], ambiguous=len(owners) > 1)
+
+    groups: dict[str, list[int]] = {}
+    for i in range(len(spans)):
+        groups.setdefault(resolved[i][1], []).append(i)
+    values: dict[int, str] = {}
+    for entity_id, members in groups.items():
+        rendered = _render(vault, ctx, entity_id, [(spans[i], resolved[i][0]) for i in members])
+        values.update(zip(members, rendered, strict=True))
+    return [
+        (
+            values[i],
+            Replacement(
+                spans[i].start, spans[i].end, resolved[i][1], resolved[i][2],
+                resolved[i][0].case if resolved[i][0] else None,
+            ),
+        )
+        for i in range(len(spans))
+    ]
 
 
 def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
