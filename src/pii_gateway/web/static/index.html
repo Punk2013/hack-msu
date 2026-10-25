@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="pii-session" content="__SESSION_TOKEN__">
+  <title>PII Gateway · Локальная песочница</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header><a href="/" class="brand">PII<span> / </span>GATEWAY</a><span class="local">● На вашем компьютере</span></header>
+  <main>
+    <section class="intro">
+      <p class="eyebrow">ЛОКАЛЬНАЯ ПЕСОЧНИЦА</p>
+      <h1>Подмените данные.<br><span>Проверьте результат.</span></h1>
+      <p>Посмотрите, что нашёл движок, как он заменил данные и что получилось после восстановления.</p>
+      <p class="scope">Текст обрабатывается локально. Облачная модель не вызывается; сетевой шлюз и изоляция этим экраном не проверяются.</p>
+    </section>
+    <section class="workspace">
+      <div class="panel input-panel">
+        <div class="panel-title"><span class="step">01</span><h2>Ваш текст</h2><button id="example" class="quiet" type="button">Пример</button></div>
+        <label for="source">Для демо используйте вымышленные данные</label>
+        <textarea id="source" maxlength="100000" spellcheck="false">Клиент: Анна Сергеевна Смирнова.
+Email: anna.demo@example.test
+Телефон: +7 900 111-22-33
+Паспорт: 00 11 123456</textarea>
+        <div class="controls"><label for="mode">Режим</label><select id="mode"><option value="realistic">Вымышленные данные</option><option value="marker">Маркеры</option></select><button id="process" type="button">Заменить данные →</button></div>
+        <p id="error" class="error" role="alert" hidden></p>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span class="step">02</span><h2>После подмены</h2></div>
+        <p id="metrics" class="muted" aria-live="polite">Запустите обработку текста.</p>
+        <pre id="masked" class="output">—</pre>
+        <p class="scope">Проверьте результат перед передачей модели. Отсутствие найденных полей не доказывает отсутствие персональных данных.</p>
+      </div>
+    </section>
+    <section class="panel detection">
+      <details><summary>Какие данные нашёл движок <span id="count">—</span></summary>
+        <div class="table-wrap"><table><thead><tr><th>Тип</th><th>Фрагмент</th><th>Диапазон символов</th><th>Детектор</th></tr></thead><tbody id="spans"></tbody></table></div>
+      </details>
+    </section>
+    <section class="workspace">
+      <div class="panel">
+        <div class="panel-title"><span class="step">03</span><h2>Обратное восстановление</h2></div>
+        <p id="roundtrip" class="muted" aria-live="polite">После обработки сравним восстановленный текст с исходником.</p>
+        <pre id="restored" class="output">—</pre>
+        <p class="scope">Дословное совпадение проверяет обратимость. Оно не измеряет полноту поиска или сохранение связей между людьми.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-title"><span class="step">04</span><h2>Попробуйте свой ответ</h2></div>
+        <label for="answer">Измените обезличенный текст — например, составьте из него письмо</label>
+        <textarea id="answer" maxlength="100000" spellcheck="false" disabled placeholder="После обработки здесь появится текст с заменами."></textarea>
+        <button id="restore" type="button" disabled>Вернуть исходные данные</button>
+        <p id="answer-status" class="muted" aria-live="polite"></p><pre id="answer-result" class="output">—</pre>
+      </div>
+    </section>
+    <footer>Соответствия хранятся во временном локальном vault до остановки сервера. Этот экран не отправляет текст облачному провайдеру.</footer>
+  </main>
+</body>
+</html>

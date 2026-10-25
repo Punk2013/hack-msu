@@ -33,3 +33,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.setuptools.package-data]
+"pii_gateway.web" = ["static/*.html", "static/*.css", "static/*.js"]
