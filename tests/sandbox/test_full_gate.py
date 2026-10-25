@@ -17,7 +17,7 @@ import uvicorn
 from pii_gateway.gateway.app import Settings, create_app
 from pii_gateway.sandbox.leaks import Canary, LeakScanner
 from pii_gateway.sandbox.runner import GatewayAddress, SandboxConfig, run_sandbox
-from pii_gateway.sandbox.upstream_spy import UpstreamSpy
+from pii_gateway.sandbox.upstream_spy import SpyResponse, UpstreamSpy
 
 DEMO = Path(__file__).resolve().parents[2] / "demo/clients"
 FIELDS = re.compile(r"^(?:ФИО|Email|Телефон|Паспорт): (.+)$", re.MULTILINE)
@@ -46,16 +46,43 @@ def scanner_for(config):
     return LeakScanner(canaries)
 
 
+def as_sse(payload):
+    """Emit logical SSE chunks, splitting tool JSON even inside escaped strings."""
+    choice = payload["choices"][0]
+    message = choice["message"]
+    deltas = [{"role": "assistant"}]
+    if message.get("content"):
+        text = message["content"]
+        deltas.extend({"content": text[i:i + 3]} for i in range(0, len(text), 3))
+    for index, call in enumerate(message.get("tool_calls", [])):
+        args = call["function"]["arguments"]
+        for offset in range(0, len(args), 13):
+            part = {"index": index, "function": {"arguments": args[offset:offset + 13]}}
+            if offset == 0:
+                part.update(id=call["id"], type="function")
+                part["function"]["name"] = call["function"]["name"]
+            deltas.append({"tool_calls": [part]})
+    events = [
+        {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+        for delta in deltas
+    ]
+    events.append({"choices": [{"index": 0, "delta": {},
+                                "finish_reason": choice["finish_reason"]}]})
+    body = "".join("data: " + json.dumps(event, ensure_ascii=False) + "\n\n" for event in events)
+    return SpyResponse((body + "data: [DONE]\n\n").encode(), "text/event-stream")
+
+
 class CopyCards:
     """Provider sees only HTTP requests, echoes received tool text into a write call."""
 
-    def __init__(self):
+    def __init__(self, stream=False):
         self.steps = 0
+        self.stream = stream
 
     def __call__(self, body):
         step = self.steps
         self.steps += 1
-        assert not body.get("stream")
+        assert bool(body.get("stream")) == self.stream
         assert step < 5
         message = {"role": "assistant", "content": None}
         finish = "tool_calls"
@@ -82,8 +109,9 @@ class CopyCards:
                 "id": f"step-{step}", "type": "function",
                 "function": {"name": tool, "arguments": json.dumps(args, ensure_ascii=False)},
             }]
-        return {"id": f"synthetic-{step}", "object": "chat.completion", "model": "synthetic",
-                "choices": [{"index": 0, "finish_reason": finish, "message": message}]}
+        result = {"id": f"synthetic-{step}", "object": "chat.completion", "model": "synthetic",
+                  "choices": [{"index": 0, "finish_reason": finish, "message": message}]}
+        return as_sse(result) if self.stream else result
 
 
 @contextmanager
@@ -107,7 +135,7 @@ def running_gateway(settings):
             assert not thread.is_alive()
 
 
-def run_agent(config, port, task="Скопируй обе карточки клиентов в out/."):
+def run_agent(config, port, task="Скопируй обе карточки клиентов в out/.", *, stream=False):
     runtimes = tuple(dict.fromkeys(
         Path(root).resolve() for root in (sys.prefix, sys.base_prefix)
         if not Path(root).resolve().is_relative_to(Path("/usr"))
@@ -116,16 +144,20 @@ def run_agent(config, port, task="Скопируй обе карточки кл�
         config.workspace, config.write_root, GatewayAddress("127.0.0.1", port),
         runtime_roots=runtimes, demo_agent=True,
     )
-    return run_sandbox(actual, [
+    command = [
         sys.executable, "--base-url", "http://127.0.0.1:8787/v1",
         "--workspace", str(config.workspace), "--model", "synthetic", "--max-steps", "8", task,
-    ], capture_output=True, timeout=60)
+    ]
+    if stream:
+        command.append("--stream")
+    return run_sandbox(actual, command, capture_output=True, timeout=60)
 
 
 @pytest.mark.parametrize("passthrough", [False, True], ids=["filtered", "positive-leak-control"])
-def test_real_agent_reads_writes_and_resends_history(working_sandbox, passthrough):
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+def test_real_agent_reads_writes_and_resends_history(working_sandbox, passthrough, stream):
     config = working_sandbox
-    provider = CopyCards()
+    provider = CopyCards(stream=stream)
     with UpstreamSpy(scanner_for(config), responder=provider) as spy:
         settings = Settings(
             upstream_base_url=spy.base_url, local_token=config.local_token,
@@ -133,7 +165,7 @@ def test_real_agent_reads_writes_and_resends_history(working_sandbox, passthroug
             workspace=config.workspace, write_roots=[config.write_root],
         )
         with running_gateway(settings) as port:
-            result = run_agent(config, port)
+            result = run_agent(config, port, stream=stream)
         assert result.returncode == 0, result.stderr
         assert "Два файла готовы." in result.stdout
         assert provider.steps == 5
@@ -157,7 +189,10 @@ def test_real_agent_reads_writes_and_resends_history(working_sandbox, passthroug
 @pytest.mark.parametrize("target", [
     "pii_gateway.detect.detector._person_spans", "pii_gateway.pseudo.engine.Vault",
 ])
-def test_real_agent_filter_failure_never_reaches_provider(working_sandbox, monkeypatch, target):
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+def test_real_agent_filter_failure_never_reaches_provider(
+    working_sandbox, monkeypatch, target, stream
+):
     config = working_sandbox
     original = "Иван Петрович Иванов"
 
@@ -165,14 +200,14 @@ def test_real_agent_filter_failure_never_reaches_provider(working_sandbox, monke
         raise RuntimeError("injected failure: " + original)
 
     monkeypatch.setattr(target, broken)
-    with UpstreamSpy(scanner_for(config), responder=CopyCards()) as spy:
+    with UpstreamSpy(scanner_for(config), responder=CopyCards(stream=stream)) as spy:
         settings = Settings(
             upstream_base_url=spy.base_url, local_token=config.local_token,
             project_id="sandbox-failure", workspace=config.workspace,
             write_roots=[config.write_root],
         )
         with running_gateway(settings) as port:
-            result = run_agent(config, port, "Подготовь письмо: " + original)
+            result = run_agent(config, port, "Подготовь письмо: " + original, stream=stream)
         assert result.returncode == 1
         assert "HTTP 500" in result.stderr
         assert original not in result.stderr
