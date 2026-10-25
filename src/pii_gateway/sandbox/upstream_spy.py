@@ -6,6 +6,7 @@ import argparse
 import json
 import threading
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,10 +30,19 @@ class UpstreamSpy:
     not silently removed. This receiver never forwards traffic to the internet.
     """
 
-    def __init__(self, scanner: LeakScanner, port: int = 0, reply_text: str = "ok"):
+    def __init__(
+        self,
+        scanner: LeakScanner,
+        port: int = 0,
+        reply_text: str = "ok",
+        *,
+        responder: Callable[[dict], dict] | None = None,
+    ):
         self.scanner = scanner
         self.port = port
         self.reply_text = reply_text
+        # Trusted local test code only; never a network-configurable hook.
+        self.responder = responder
         self._lock = threading.Lock()
         self._observations: deque[Observation] = deque(maxlen=1000)
         self._requests = 0
@@ -182,12 +192,9 @@ class UpstreamSpy:
                         status = 400
                 if status == 200:
                     try:
-                        json.loads(body)
+                        request = json.loads(body)
                     except (ValueError, RecursionError):
                         status = 400
-                self._record(
-                    body, status, fully_scanned=fully_scanned, expected=expected and status == 200
-                )
                 payload = (
                     {
                         "id": "synthetic-spy",
@@ -204,7 +211,17 @@ class UpstreamSpy:
                     if status == 200
                     else {"error": {"message": "unsupported synthetic request"}}
                 )
-                encoded = json.dumps(payload, ensure_ascii=False).encode()
+                try:
+                    if status == 200 and owner.responder is not None:
+                        payload = owner.responder(request)
+                    encoded = json.dumps(payload, ensure_ascii=False).encode()
+                except Exception:
+                    # A broken scripted provider cannot hide a leak or look clean.
+                    status = 500
+                    encoded = b'{"error":{"message":"synthetic responder failed"}}'
+                self._record(
+                    body, status, fully_scanned=fully_scanned, expected=expected and status == 200
+                )
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
