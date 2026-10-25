@@ -17,7 +17,6 @@ from pii_gateway.gateway.adapter import apply_tool_policy
 from pii_gateway.gateway.policy import ToolPolicy
 from pii_gateway.gateway.transform import Transformer
 
-
 MAX_BUFFER_CHARS = 1_048_576
 
 
