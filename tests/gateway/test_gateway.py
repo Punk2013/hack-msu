@@ -168,7 +168,10 @@ def test_policy_violation_removes_call(tmp_path, tool_call):
 
 def test_symlink_outside_write_root_is_blocked(tmp_path):
     (tmp_path / "out").mkdir()
-    (tmp_path / "out" / "link").symlink_to(tmp_path)
+    try:
+        (tmp_path / "out" / "link").symlink_to(tmp_path)
+    except OSError:
+        pytest.skip("symlinks not supported or permitted on this platform")
     up = Upstream(reply=_tool_reply(call("write_file", {"path": "out/link/x.txt",
                                                         "content": FAKE})))
     choice = _post(client(tmp_path, up))["choices"][0]
