@@ -122,3 +122,13 @@ def test_model_reorders_name_or_uses_initials_or_surname_only():
     }
     for probe, expected in probes.items():
         assert restore(probe, ctx).text == expected, probe
+
+
+@pytest.mark.parametrize("raw", ["Петров\nКонтакты", "Иван\nФамилия", "Иван  Петров"])
+def test_odd_person_span_falls_back_to_marker_instead_of_failing(raw):
+    # spans like these came from NER on a model-written form in the live 7b run
+    ctx = Context("odd")
+    text = f"Имя: {raw}"
+    result = mask(text, spans_for(text, (raw, PiiType.PERSON)), ctx)
+    assert raw not in result.text
+    assert restore(result.text, ctx).text == text

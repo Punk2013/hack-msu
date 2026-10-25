@@ -158,10 +158,16 @@ class _Name:
 def _analyze_name(raw: str) -> _Name | None:
     """Extract Name/Patr/Surn roles, gender, and case via pymorphy3, or None."""
     words = raw.split()
-    if not (1 <= len(words) <= 3):
-        return None
+    if not (1 <= len(words) <= 3) or raw != " ".join(words):
+        return None  # line breaks or odd spacing: not a single name, use a marker
     analyzer = _morph()
-    word_parses = [analyzer.parse(w) for w in words]
+    # only parses that are a name part; a common noun next to a name ("Петров\nКонтакты")
+    # must not become a name token
+    word_parses = [
+        [p for p in analyzer.parse(w) if set(ROLES) & set(p.tag.grammemes)] for w in words
+    ]
+    if not all(word_parses):
+        return None
 
     for gender in ("masc", "femn"):
         chosen = []
