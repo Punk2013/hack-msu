@@ -24,3 +24,6 @@ __pycache__/
 *.db-wal
 *.db-shm
 dumps/
+
+# Demo output (generated)
+demo/out/
