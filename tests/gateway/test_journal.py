@@ -46,3 +46,20 @@ def test_journal_records_both_directions_and_report_shows_them(tmp_path):
     page = build(journal)
     assert "<mark class=real>Иван</mark>" in page and "<mark class=fake>Пётр</mark>" in page
     assert "<b>2</b>обращений к модели" in page
+
+
+def test_system_prompt_is_collapsed_in_report(tmp_path):
+    journal = tmp_path / "j.jsonl"
+    prompt = "You are an expert coding assistant operating inside pi. " * 50
+    journal.write_text(json.dumps({
+        "ts": 0,
+        "request_in": [{"role": "system", "content": prompt},
+                       {"role": "user", "content": "Привет, я Иван Иванов"}],
+        "request_out": [{"role": "system", "content": prompt},
+                        {"role": "user", "content": "Привет, я Пётр Петров"}],
+        "model_said": {"content": "", "tool_calls": []},
+        "agent_got": {"content": "", "tool_calls": []},
+    }, ensure_ascii=False) + "\n")
+    page = build(journal)
+    assert "<details><summary>Системный промпт агента" in page and "без замен" in page
+    assert "<mark class=real>Иван</mark>" in page

@@ -34,6 +34,7 @@ th.role,td.role{width:84px;color:var(--muted)}
 pre{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 ui-monospace,monospace}
 mark{color:inherit;border-radius:3px;padding:0 2px}.fake{background:var(--fake)}
 .real{background:var(--real)}.blocked{background:var(--bad);padding:2px 6px;border-radius:4px}
+details summary{cursor:pointer;color:var(--muted)}details table{margin-top:6px}
 """
 
 
@@ -43,8 +44,17 @@ def _rows(pairs: list[tuple[str, str, str]], left_is_real: bool) -> tuple[str, i
         masked, restored, n = _diff(fake, real)
         changes += n
         left, right = (restored, masked) if left_is_real else (masked, restored)
-        out.append(f"<tr><td class=role>{html.escape(role)}</td>"
-                   f"<td><pre>{left}</pre></td><td><pre>{right}</pre></td></tr>")
+        row = (f"<td><pre>{left}</pre></td><td><pre>{right}</pre></td>")
+        if role in ("system", "developer"):
+            # the agent's own instructions (pi prompt, AGENTS.md): long and rarely relevant
+            note = f"замен: {n}" if n else "без замен"
+            out.append(
+                f"<tr><td class=role>{role}</td><td colspan=2><details><summary>"
+                f"Системный промпт агента · {len(real)} символов · {note}</summary>"
+                f"<table><tr>{row}</tr></table></details></td></tr>"
+            )
+        else:
+            out.append(f"<tr><td class=role>{html.escape(role)}</td>{row}</tr>")
     return "".join(out), changes
 
 
