@@ -1,21 +1,27 @@
-"""Core pseudonymization engine: mask and restore (role 3, issue #11).
+"""Pseudonymization engine: mask and restore (role 3, issue #11).
 
-Provides:
-- Deterministic marker assignment ([PERSON_1], [EMAIL_1], etc.)
-- Replay stability across turns (same person/structured field gets same marker)
-- Idempotent Vault persistence outside workspace
-- Realistic Russian inflection and declension with collision prevention
-- Strict unmasking: unknown or corrupted markers return PARTIAL
+- One entity per normalized value in a project: the same full name always gets
+  the same replacement, in any case and in any text field, on every turn.
+- realistic (default): inflected fake names via pymorphy3 and format-preserving
+  fakes for structured values; marker ([PERSON_1]) only as a fallback.
+- restore() replaces only replacements recorded in the vault and never guesses.
+- Corrupted/malformed markers ([PERSON_1, [PERSON_x], [PERSON_1 ]) return PARTIAL.
+- Literal user markers in input text are reserved so newly issued markers never collide.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
+from dataclasses import dataclass
+from functools import lru_cache
+from itertools import combinations
 
 from pii_gateway.core.types import (
     Context,
     EntitySpan,
+    MaskError,
     MaskResult,
     PiiType,
     Replacement,
@@ -24,11 +30,7 @@ from pii_gateway.core.types import (
     Unresolved,
     check_spans,
 )
-from pii_gateway.pseudo.morphology import (
-    generate_realistic_pair,
-    lemmatize_surname,
-    parse_and_decline_full_name,
-)
+from pii_gateway.pseudo.fakes import fake_value
 from pii_gateway.vault.storage import Vault
 
 KNOWN_PII_TYPES = (
@@ -44,7 +46,7 @@ KNOWN_PII_TYPES = (
 )
 TYPES_PATTERN = "|".join(KNOWN_PII_TYPES)
 
-VALID_MARKER_PATTERN = re.compile(rf"\[({TYPES_PATTERN})_([0-9]+)\]")
+MARKER_PATTERN = re.compile(rf"\[({TYPES_PATTERN})_([0-9]+)\]")
 
 # Matches malformed or corrupted markers:
 # 1. Non-numeric or whitespace inside tag: [PERSON_x], [PERSON_1 ]
@@ -55,256 +57,335 @@ CORRUPTED_MARKER_PATTERN = re.compile(
     rf"(?:_[^\]\n0-9][^\]\n]*\]|_[0-9]+[ ]+\]|\]|_[0-9]+\b(?!\s*\])|_[a-zA-Z]+\b(?!\s*\]))"
 )
 
+CASES = ("nomn", "gent", "datv", "accs", "ablt", "loct")
+ROLES = ("Name", "Patr", "Surn")
+MAX_ATTEMPTS = 8
+
+# Regular, declinable names only: their case forms never collapse where an
+# original's forms differ (see the "Саша Шевченко" counterexample).
+POOLS = {
+    ("Name", "masc"): (
+        "Дмитрий",
+        "Алексей",
+        "Сергей",
+        "Андрей",
+        "Михаил",
+        "Павел",
+        "Николай",
+        "Роман",
+        "Олег",
+        "Виктор",
+        "Антон",
+        "Кирилл",
+    ),
+    ("Name", "femn"): (
+        "Елена",
+        "Ольга",
+        "Татьяна",
+        "Ирина",
+        "Марина",
+        "Светлана",
+        "Ксения",
+        "Вера",
+        "Полина",
+        "Дарья",
+        "Алина",
+        "Галина",
+    ),
+    ("Patr", "masc"): (
+        "Андреевич",
+        "Викторович",
+        "Николаевич",
+        "Олегович",
+        "Павлович",
+        "Романович",
+        "Алексеевич",
+        "Дмитриевич",
+    ),
+    ("Patr", "femn"): (
+        "Андреевна",
+        "Викторовна",
+        "Николаевна",
+        "Олеговна",
+        "Павловна",
+        "Романовна",
+        "Алексеевна",
+        "Дмитриевна",
+    ),
+    ("Surn", "masc"): (
+        "Соколов",
+        "Морозов",
+        "Лебедев",
+        "Новиков",
+        "Орлов",
+        "Зайцев",
+        "Фролов",
+        "Голубев",
+        "Виноградов",
+        "Богданов",
+        "Комаров",
+        "Белов",
+    ),
+}
+POOLS[("Surn", "femn")] = tuple(s + "а" for s in POOLS[("Surn", "masc")])
+
+
+@lru_cache(maxsize=1)
+def _morph():
+    import pymorphy3
+
+    return pymorphy3.MorphAnalyzer()
+
+
+@dataclass(frozen=True)
+class _Token:
+    role: str  # Name | Patr | Surn
+    normal: str
+    parse: object
+
+
+@dataclass(frozen=True)
+class _Name:
+    tokens: tuple[_Token, ...]
+    gender: str  # masc | femn
+    case: str  # nomn | gent | ...
+
+    def key(self, roles: tuple[str, ...]) -> str:
+        parts = [f"{t.role}:{t.normal}" for t in self.tokens if t.role in roles]
+        return f"PERSON|{self.gender}|{'|'.join(parts)}"
+
+
+def _analyze_name(raw: str) -> _Name | None:
+    """Extract Name/Patr/Surn roles, gender, and case via pymorphy3, or None."""
+    words = raw.split()
+    if not (1 <= len(words) <= 3):
+        return None
+    analyzer = _morph()
+    word_parses = [analyzer.parse(w) for w in words]
+
+    for gender in ("masc", "femn"):
+        chosen = []
+        cases = set(CASES)
+        for parses in word_parses:
+            fit = [
+                p
+                for p in parses
+                if {gender, "ms-f"} & set(p.tag.grammemes) and p.tag.case in CASES
+            ]
+            if not fit:
+                break
+            cases &= {p.tag.case for p in fit}
+            chosen.append(fit)
+        else:
+            if not cases:
+                continue
+            case = next(c for c in CASES if c in cases)
+            tokens = []
+            for fit in chosen:
+                p = next(p for p in fit if p.tag.case == case)
+                role = next(r for r in ROLES if r in p.tag.grammemes)
+                tokens.append(_Token(role, p.normal_form, p))
+            roles = [t.role for t in tokens]
+            if len(set(roles)) != len(roles):
+                return None
+            return _Name(tuple(tokens), gender, case)
+    return None
+
+
+def _inflect(parse, case: str, gender: str, like: str) -> str | None:
+    form = parse.inflect({case, gender}) or parse.inflect({case})
+    if form is None:
+        return None
+    word = form.word
+    return word[:1].upper() + word[1:] if like[:1].isupper() else word
+
+
+def _pseudo_parse(role: str, gender: str, entity_id: str, attempt: int):
+    pool = POOLS[(role, gender)]
+    digest = hashlib.sha256(f"{entity_id}:{role}:{attempt}".encode()).digest()
+    word = pool[int.from_bytes(digest[:4], "big") % len(pool)]
+    parses = [p for p in _morph().parse(word) if role in p.tag.grammemes]
+    return parses[0] if parses else None
+
+
+def _person_pairs(
+    name: _Name, raw: str, entity_id: str, attempt: int, vault: Vault
+) -> dict[str, str] | None:
+    """{fake_form: original_form} for all cases of this mention, or None if unsafe."""
+    words = raw.split()
+    pairs: dict[str, str] = {}
+    for case in CASES:
+        orig, fake = [], []
+        for token, word in zip(name.tokens, words, strict=True):
+            o = _inflect(token.parse, case, name.gender, word)
+            pp = _pseudo_parse(token.role, name.gender, entity_id, attempt)
+            f = _inflect(pp, case, name.gender, word) if pp is not None else None
+            if o is None or f is None:
+                return None
+            orig.append(o)
+            fake.append(f)
+        o_text, f_text = " ".join(orig), " ".join(fake)
+        if case == name.case:
+            o_text = raw  # keep the exact spelling the user wrote
+        if pairs.get(f_text, o_text) != o_text:
+            return None  # one fake form would restore to two originals
+        known = vault.get_pair(f_text)
+        if f_text == o_text or vault.is_known_original(f_text) or known not in (None, o_text):
+            return None
+        pairs[f_text] = o_text
+    return pairs
+
+
+def _normalize(kind: PiiType, raw: str) -> str:
+    if kind is PiiType.EMAIL:
+        return raw.strip().lower()
+    if kind in (PiiType.PHONE, PiiType.PASSPORT_RU):
+        digits = re.sub(r"\D", "", raw)
+        if kind is PiiType.PHONE and len(digits) == 11 and digits[0] == "8":
+            digits = "7" + digits[1:]
+        return digits
+    return " ".join(raw.split())
+
+
+def _resolve_entity(
+    vault: Vault, kind: PiiType, keys: list[str], is_partial: bool = False
+) -> tuple[str, str]:
+    """keys[0] is the full key, the rest are partial ones; returns (entity_id, linked_by)."""
+    found, entity_id = vault.get_key(keys[0])
+    if found and entity_id is not None:
+        return entity_id, "partial_single" if is_partial else "exact"
+    if not found:
+        owners = set()
+        for key in keys[1:]:
+            k_found, owner = vault.get_key(key)
+            if k_found:
+                owners.add(owner)
+        if len(owners) == 1 and None not in owners:
+            entity_id = owners.pop()
+            for key in keys:
+                vault.add_key(key, entity_id)
+            return entity_id, "partial_single"
+    if found:  # partial name shared by several people: its own stable entity
+        keys = [f"ambiguous|{keys[0]}"]
+        a_found, entity_id = vault.get_key(keys[0])
+        if a_found and entity_id is not None:
+            return entity_id, "new"
+    entity_id = f"ent_{uuid.uuid4().hex[:12]}"
+    vault.add_entity(entity_id, kind, is_ambiguous=found)
+    for key in keys:
+        vault.add_key(key, entity_id)
+    return entity_id, "new"
+
+
+def _marker(vault: Vault, kind: PiiType, entity_id: str, raw: str) -> str:
+    marker = vault.get_marker_for_entity(entity_id)
+    if marker is None:
+        marker = f"[{kind}_{vault.get_next_marker_index(kind)}]"
+        vault.add_marker(marker, entity_id, kind)
+    vault.add_pair(marker, raw, entity_id)
+    return marker
+
+
+def _replace_one(vault: Vault, span: EntitySpan, ctx: Context) -> tuple[str, Replacement]:
+    raw, kind = span.raw_text, span.type
+    name = _analyze_name(raw) if kind is PiiType.PERSON else None
+    if name is not None:
+        roles = tuple(t.role for t in name.tokens)
+        is_partial = len(roles) == 1
+        partial = [
+            name.key(sub)
+            for n in range(len(roles) - 1, 0, -1)
+            for sub in combinations(roles, n)
+            if sub not in (("Name",), ("Patr",))
+        ]
+        keys = [name.key(roles), *partial]
+    else:
+        is_partial = False
+        keys = [f"{kind}|{_normalize(kind, raw)}"]
+    entity_id, linked_by = _resolve_entity(vault, kind, keys, is_partial=is_partial)
+    rep = Replacement(span.start, span.end, entity_id, linked_by, name.case if name else None)
+
+    if ctx.mode == "realistic":
+        for attempt in range(MAX_ATTEMPTS):
+            if name is not None:
+                pairs = _person_pairs(name, raw, entity_id, attempt, vault)
+                if pairs is None:
+                    continue
+                for fake, orig in pairs.items():
+                    vault.add_pair(fake, orig, entity_id)
+                return next(f for f, o in pairs.items() if o == raw), rep
+            fake = fake_value(kind, raw, entity_id, attempt)
+            if fake is None:
+                break
+            if vault.is_known_original(fake) or vault.get_pair(fake) not in (None, raw):
+                continue
+            vault.add_pair(fake, raw, entity_id)
+            return fake, rep
+    return _marker(vault, kind, entity_id, raw), rep
+
 
 def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
-    """Replace entity spans in text with markers or realistic pseudonyms.
-
-    Raises:
-        DetectError: if spans are invalid or overlapping.
-        MaskError: on transformation failure.
-    """
     check_spans(text, spans)
     if not spans:
         return MaskResult(text=text, replacements=[])
+    try:
+        with Vault(ctx.project_id) as vault:
+            # 1. Prevent collision with literal markers already existing in the input text:
+            for m in MARKER_PATTERN.finditer(text):
+                m_type, m_id = m.group(1), m.group(2)
+                vault.reserve_marker_index_at_least(m_type, int(m_id))
 
-    vault = Vault(ctx.project_id)
+            planned = [_replace_one(vault, span, ctx) for span in spans]
+    except MaskError:
+        raise
+    except Exception as exc:  # never leak input text through third-party errors
+        raise MaskError(f"mask failed: {type(exc).__name__}") from None
 
-    # 1. Prevent collision with literal markers already existing in the input text:
-    # If the text originally contains e.g. "[PERSON_1]", reserve at least 1 for PERSON
-    # so that newly assigned markers will start from [PERSON_2].
-    for m in VALID_MARKER_PATTERN.finditer(text):
-        m_type, m_id = m.group(1), m.group(2)
-        try:
-            val = int(m_id)
-            vault.reserve_marker_index_at_least(m_type, val)
-        except ValueError:
-            pass
-
-    replacements: list[Replacement] = []
-    span_replacements: list[tuple[EntitySpan, str, Replacement]] = []
-
-    # Map raw_text -> entity_id within this batch to ensure replay stability
-    seen_in_batch: dict[str, str] = {}
-
-    # Gather full person entities in this batch for partial_single resolution
-    full_persons_in_batch: dict[str, str] = {}  # surname_lemma -> entity_id
-    surname_counts: dict[str, int] = {}
-    for span in spans:
-        if span.type == PiiType.PERSON and " " in span.raw_text.strip():
-            forms, gender, _ = parse_and_decline_full_name(span.raw_text)
-            parts = span.raw_text.strip().split()
-            sn = parts[1] if len(parts) == 2 else parts[-1]
-            sn_lemma = lemmatize_surname(sn, gender)
-            surname_counts[sn_lemma] = surname_counts.get(sn_lemma, 0) + 1
-
-    used_pseudos = vault.get_all_used_pseudonyms()
-
-    for span in spans:
-        entity_id: str
-        linked_by = "new"
-        form_name: str | None = None
-
-        if span.raw_text in seen_in_batch:
-            # Reusing exact mention in this batch
-            entity_id = seen_in_batch[span.raw_text]
-            linked_by = "exact"
-        elif span.type == PiiType.PERSON:
-            is_full_name = " " in span.raw_text.strip()
-            if is_full_name:
-                forms, gender, matched_case = parse_and_decline_full_name(span.raw_text)
-                form_name = matched_case
-                nomn_form = forms.get("nomn", span.raw_text)
-
-                if nomn_form in seen_in_batch:
-                    entity_id = seen_in_batch[nomn_form]
-                    linked_by = "exact"
-                else:
-                    # Search vault by exact text or canonical nominative form
-                    existing = vault.find_entity_by_original_text(
-                        span.raw_text, span.type
-                    ) or vault.find_entity_by_original_text(nomn_form, span.type)
-                    if existing:
-                        entity_id = existing.entity_id
-                        linked_by = "exact"
-                    else:
-                        entity_id = f"ent_{uuid.uuid4().hex[:12]}"
-                        vault.add_entity(entity_id, span.type, is_ambiguous=False)
-                        linked_by = "new"
-
-                    seen_in_batch[nomn_form] = entity_id
-                    # Record canonical surface
-                    vault.add_surface(
-                        surface_id=f"surf_canon_{entity_id}",
-                        entity_id=entity_id,
-                        side="canonical",
-                        text=nomn_form,
-                        form="nomn",
-                    )
-
-                seen_in_batch[span.raw_text] = entity_id
-                parts = span.raw_text.strip().split()
-                sn = parts[1] if len(parts) == 2 else parts[-1]
-                sn_lemma = lemmatize_surname(sn, gender)
-                full_persons_in_batch[sn_lemma] = entity_id
-            else:
-                # Partial mention (single word surname like "Иванов")
-                sn_lemma = lemmatize_surname(span.raw_text, "masc")
-                if surname_counts.get(sn_lemma) == 1 and sn_lemma in full_persons_in_batch:
-                    entity_id = full_persons_in_batch[sn_lemma]
-                    linked_by = "partial_single"
-                else:
-                    existing = vault.find_entity_by_original_text(span.raw_text, span.type)
-                    if existing:
-                        entity_id = existing.entity_id
-                        linked_by = "exact"
-                    else:
-                        entity_id = f"ent_{uuid.uuid4().hex[:12]}"
-                        vault.add_entity(entity_id, span.type, is_ambiguous=True)
-                        linked_by = "new"
-                seen_in_batch[span.raw_text] = entity_id
-        else:
-            # Structured types (EMAIL, PHONE, PASSPORT_RU)
-            existing = vault.find_entity_by_original_text(span.raw_text, span.type)
-            if existing:
-                entity_id = existing.entity_id
-                linked_by = "exact"
-            else:
-                entity_id = f"ent_{uuid.uuid4().hex[:12]}"
-                vault.add_entity(entity_id, span.type, is_ambiguous=False)
-                linked_by = "new"
-            seen_in_batch[span.raw_text] = entity_id
-
-        # Record original surface
-        vault.add_surface(
-            surface_id=f"surf_{uuid.uuid4().hex[:12]}",
-            entity_id=entity_id,
-            side="original",
-            text=span.raw_text,
-            form=form_name,
+    out, replacements, pos, shift = [], [], 0, 0
+    for span, (value, rep) in zip(spans, planned, strict=True):
+        out.append(text[pos : span.start])
+        out.append(value)
+        start = span.start + shift
+        replacements.append(
+            Replacement(start, start + len(value), rep.entity_id, rep.linked_by, rep.form)
         )
-
-        # Record mention
-        vault.add_mention(
-            mention_id=f"ment_{uuid.uuid4().hex[:12]}",
-            entity_id=entity_id,
-            source_id="doc",
-            start_idx=span.start,
-            end_idx=span.end,
-        )
-
-        replacement_str: str
-
-        if ctx.mode == "realistic" and span.type == PiiType.PERSON and " " in span.raw_text.strip():
-            pair = generate_realistic_pair(span.raw_text, entity_id, used_pseudos=used_pseudos)
-            if pair is not None and pair.is_bijective:
-                case_key = form_name or "nomn"
-                replacement_str = pair.pseudo_forms.get(case_key, pair.pseudo_forms["nomn"])
-
-                # Store all case surfaces for realistic unmasking
-                for c_name, p_text in pair.pseudo_forms.items():
-                    o_text = pair.original_forms.get(c_name, span.raw_text)
-                    vault.add_surface(
-                        surface_id=f"surf_{uuid.uuid4().hex[:12]}",
-                        entity_id=entity_id,
-                        side="original",
-                        text=o_text,
-                        form=c_name,
-                    )
-                    vault.add_surface(
-                        surface_id=f"surf_{uuid.uuid4().hex[:12]}",
-                        entity_id=entity_id,
-                        side="pseudo",
-                        text=p_text,
-                        form=c_name,
-                    )
-                    used_pseudos.add(p_text)
-            else:
-                # Fallback to marker mode if pair is non-bijective or pool collided
-                existing_marker = vault.get_marker_for_entity(entity_id)
-                if existing_marker:
-                    replacement_str = existing_marker
-                else:
-                    marker_idx = vault.get_next_marker_index(span.type)
-                    replacement_str = f"[{span.type}_{marker_idx}]"
-                    vault.add_marker(replacement_str, entity_id, span.type)
-        else:
-            # Marker mode
-            existing_marker = vault.get_marker_for_entity(entity_id)
-            if existing_marker:
-                replacement_str = existing_marker
-            else:
-                marker_idx = vault.get_next_marker_index(span.type)
-                replacement_str = f"[{span.type}_{marker_idx}]"
-                vault.add_marker(replacement_str, entity_id, span.type)
-
-        rep = Replacement(
-            start=span.start,
-            end=span.end,
-            entity_id=entity_id,
-            linked_by=linked_by,  # type: ignore[arg-type]
-            form=form_name,
-        )
-        span_replacements.append((span, replacement_str, rep))
-
-    # Apply replacements from right to left to preserve offsets
-    span_replacements.sort(key=lambda item: item[0].start, reverse=True)
-    out_chars = list(text)
-
-    for span, rep_str, rep in span_replacements:
-        out_chars[span.start : span.end] = list(rep_str)
-        replacements.append(rep)
-
-    replacements.reverse()
-    return MaskResult(text="".join(out_chars), replacements=replacements)
+        shift += len(value) - (span.end - span.start)
+        pos = span.end
+    out.append(text[pos:])
+    return MaskResult(text="".join(out), replacements=replacements)
 
 
 def restore(text: str, ctx: Context) -> RestoreResult:
-    """Restore known markers and realistic pseudonyms back to original text.
-
-    Unknown or corrupted markers are never guessed and are returned as Unresolved.
-    Status is PARTIAL if any marker or form could not be resolved.
-    """
-    vault = Vault(ctx.project_id)
-    marker_map = vault.get_all_marker_mappings()
-    pseudo_map = vault.get_all_pseudo_mappings()
-
+    with Vault(ctx.project_id) as vault:
+        pairs = vault.get_pairs()
+    if pairs:
+        alternation = "|".join(re.escape(r) for r in sorted(pairs, key=len, reverse=True))
+        pattern = re.compile(rf"(?<!\w)(?:{alternation})(?!\w)|{MARKER_PATTERN.pattern}")
+    else:
+        pattern = MARKER_PATTERN
+    result: list[str] = []
     unresolved: list[Unresolved] = []
 
-    # Phase 1: Realistic pseudonym replacement (longest match first)
-    current_text = text
-    if pseudo_map:
-        for pseudo_text, orig_text, _ in pseudo_map:
-            if pseudo_text in current_text:
-                current_text = current_text.replace(pseudo_text, orig_text)
+    # Check for corrupted or malformed markers first
+    for m in CORRUPTED_MARKER_PATTERN.finditer(text):
+        unresolved.append(Unresolved(m.start(), m.end(), "unknown_marker"))
 
-    # Phase 2: Check for malformed or corrupted markers
-    for m in CORRUPTED_MARKER_PATTERN.finditer(current_text):
-        unresolved.append(
-            Unresolved(start=m.start(), end=m.end(), reason="unknown_marker")
-        )
-
-    # Phase 3: Valid marker replacement
-    valid_matches = list(VALID_MARKER_PATTERN.finditer(current_text))
-    if not valid_matches and not unresolved:
-        return RestoreResult(text=current_text, status=RestoreStatus.COMPLETE, unresolved=[])
-
-    chars = list(current_text)
-    # Process from end to beginning to preserve replacement offsets
-    matches_sorted = sorted(valid_matches, key=lambda m: m.start(), reverse=True)
-
-    for m in matches_sorted:
-        m_str = m.group(0)
-        start, end = m.start(), m.end()
-
-        if m_str in marker_map:
-            orig = marker_map[m_str]
-            chars[start:end] = list(orig)
+    pos = out_len = 0
+    for match in pattern.finditer(text):
+        token = match.group(0)
+        before = text[pos : match.start()]
+        result.append(before)
+        out_len += len(before)
+        if token in pairs:
+            value = pairs[token]
         else:
-            unresolved.append(
-                Unresolved(start=start, end=end, reason="unknown_marker")
-            )
+            value = token
+            unresolved.append(Unresolved(out_len, out_len + len(token), "unknown_marker"))
+        result.append(value)
+        out_len += len(value)
+        pos = match.end()
+    result.append(text[pos:])
 
     unresolved.sort(key=lambda u: u.start)
-    result_text = "".join(chars)
     status = RestoreStatus.PARTIAL if unresolved else RestoreStatus.COMPLETE
-    return RestoreResult(text=result_text, status=status, unresolved=unresolved)
+    return RestoreResult(text="".join(result), status=status, unresolved=unresolved)

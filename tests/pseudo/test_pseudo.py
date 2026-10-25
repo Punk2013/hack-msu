@@ -119,6 +119,8 @@ def test_identical_full_name_reuses_entity_and_is_idempotent():
 
     masked1 = mask(text, spans, ctx)
     assert masked1.text == "Запись A: [PERSON_1], [EMAIL_1]. Запись B: [PERSON_1], [EMAIL_2]."
+    assert masked1.text.count("[PERSON_1]") == 2
+    assert "[PERSON_2]" not in masked1.text
 
     vault = Vault(ctx.project_id)
     counts1 = vault.count_rows()
