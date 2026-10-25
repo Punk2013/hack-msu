@@ -252,3 +252,10 @@ def test_stream_buffers_text_until_choice_completion(tmp_path):
     assert all("[PERSO" not in d and "N_1]" not in d for d in deltas)
     assert len([d for d in deltas if d]) == 1
     assert "".join(deltas) == f"Письмо для {REAL} отправлено, копия {REAL} в архиве."
+
+
+def test_store_is_accepted_but_always_disabled(tmp_path):
+    up = Upstream()
+    body = {"model": "m", "store": True, "messages": [{"role": "user", "content": "hi"}]}
+    assert client(tmp_path, up).post("/v1/chat/completions", json=body).status_code == 200
+    assert up.requests[0]["store"] is False
