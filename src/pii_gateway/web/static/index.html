@@ -3,10 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="pii-session" content="__SESSION_TOKEN__">
   <title>PII Gateway — Презентация и Демонстрация</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="static/styles.css">
 </head>
 <body class="deck-mode">
@@ -53,7 +51,7 @@
         </button>
         <button class="step-nav-btn" data-step="4">
           <span class="step-num">04</span>
-          <span class="step-text">Ответ LLM</span>
+          <span class="step-text">Пример ответа</span>
           <span class="step-line"></span>
         </button>
         <button class="step-nav-btn" data-step="5">
@@ -110,6 +108,14 @@
           </p>
         </div>
 
+        <!-- Error / Failure Banner (Visible on engine or validation rejection) -->
+        <div class="error-banner-wrap" id="error-banner-wrap" style="display: none;">
+          <div class="error-banner">
+            <span class="error-icon">⚠️</span>
+            <span class="error-text" id="error-banner-text">Шлюз отклонил обработку.</span>
+          </div>
+        </div>
+
         <div class="slide-body slide-body-single">
           <div class="editor-card">
             <div class="card-topbar">
@@ -161,19 +167,19 @@
         <!-- Telemetry Strip -->
         <div class="slide-metrics-strip">
           <div class="metric-pill pill-cyan">
-            <span class="metric-val" id="s2-count">7</span>
+            <span class="metric-val" id="s2-count">0</span>
             <span class="metric-lbl">Сущностей найдено</span>
           </div>
           <div class="metric-pill pill-purple">
-            <span class="metric-val" id="s2-types">PERSON, EMAIL, PHONE, PASSPORT_RU</span>
+            <span class="metric-val" id="s2-types">—</span>
             <span class="metric-lbl">Категории ПДн</span>
           </div>
           <div class="metric-pill pill-emerald">
-            <span class="metric-val" id="s2-latency">1.1 мс</span>
+            <span class="metric-val" id="s2-latency">0.0 мс</span>
             <span class="metric-lbl">Скорость детекции</span>
           </div>
           <div class="metric-pill pill-blue">
-            <span class="metric-val">100% ZERO-LEAK</span>
+            <span class="metric-val">LOCAL PASS</span>
             <span class="metric-lbl">Статус перехвата</span>
           </div>
         </div>
@@ -222,20 +228,20 @@
           </div>
           <p class="slide-desc">
             Оригинальные данные сохраняются в локальном защищенном хранилище Vault (SQLite chmod 0600).
-            Во внешнюю сеть и сторонним LLM отправляются безопасные реалистичные псевдонимы с сохранением падежей.
+            Во внешний контекст передаются безопасные реалистичные псевдонимы с сохранением падежей.
           </p>
         </div>
 
         <div class="slide-body slide-body-split-equal">
-          <!-- Left: Outbound payload to external LLM -->
+          <!-- Left: Outbound payload -->
           <div class="panel-card">
             <div class="card-topbar">
               <div class="topbar-left">
-                <span class="badge-pill bg-emerald">📤 ИСХОДЯЩИЙ ЗАПРОС К LLM</span>
-                <span class="panel-caption">Обезличенный текст (Wire Payload)</span>
+                <span class="badge-pill bg-emerald">📤 ОБЕЗЛИЧЕННЫЙ ТЕКСТ</span>
+                <span class="panel-caption">Контекст для автономного агента</span>
               </div>
               <div class="topbar-right">
-                <span class="chip-canary-pass" id="s3-canary-badge">✓ 0 УТЕЧЕК (CANARY CLEAN)</span>
+                <span class="chip-canary-pass" id="s3-canary-badge">✓ НАЙДЕННЫЕ СУЩНОСТИ ЗАМЕНЕНЫ</span>
               </div>
             </div>
             <div class="card-inner-scrollable">
@@ -245,7 +251,7 @@
             </div>
             <div class="card-bottom-callout">
               <span class="callout-icon">🔒</span>
-              <span>Ни один байт реальных персональных данных клиента не покидает контур безопасности.</span>
+              <span>Все обнаруженные персональные данные изолированы в пределах локального хранилища сессии.</span>
             </div>
           </div>
 
@@ -254,7 +260,7 @@
             <div class="card-topbar">
               <div class="topbar-left">
                 <span class="badge-pill bg-blue">🗄️ ТАБЛИЦА СООТВЕТСТВИЙ VAULT</span>
-                <span class="panel-caption">SQLite chmod 0600 (Локальная изоляция)</span>
+                <span class="panel-caption">SQLite chmod 0600 (Локальная сессия)</span>
               </div>
               <div class="topbar-right">
                 <span class="vault-secure-tag">1:1 БИЕКЦИЯ</span>
@@ -291,10 +297,10 @@
         <div class="slide-header">
           <div class="slide-badge-title">
             <span class="badge-step step-purple">ШАГ 04 ИЗ 05</span>
-            <h2 class="slide-title">Ответ автономного агента (LLM Output)</h2>
+            <h2 class="slide-title">Пример ответа агента (с псевдонимами)</h2>
           </div>
           <p class="slide-desc">
-            Внешняя облачная модель (OpenAI GPT-4o / Claude / Qwen) сформировала ответ на основе обезличенного контекста.
+            Локальный пример ответа автономного агента по шаблону на основе обезличенных данных (внешняя LLM не вызывалась).
             Псевдонимы использованы в естественных грамматических падежах.
           </p>
         </div>
@@ -304,11 +310,11 @@
             <div class="card-topbar">
               <div class="topbar-left">
                 <span class="ai-pulse-dot"></span>
-                <span class="ai-model-tag" id="s4-model-name">Qwen 2.5 / OpenAI GPT-4o (Autonomous Agent Worker)</span>
-                <span class="badge-untrusted-cloud">ОБЛАЧНАЯ LLM БЕЗ ДОСТУПА К ПДН</span>
+                <span class="ai-model-tag" id="s4-model-name">Локальный пример ответа агента (LLM не вызывалась)</span>
+                <span class="badge-untrusted-cloud">ОБЕЗЛИЧЕННЫЙ КОНТЕКСТ</span>
               </div>
               <div class="topbar-right">
-                <span class="tag-status-ok">HTTP 200 OK</span>
+                <span class="tag-status-ok">LOCAL 200 OK</span>
               </div>
             </div>
 
@@ -327,8 +333,8 @@
             <div class="card-footer-info footer-educational">
               <div class="edu-badge">ПРИМЕЧАНИЕ ДЛЯ ЖЮРИ</div>
               <div class="edu-text">
-                Обратите внимание: Языковая модель естественно обращается к клиенту в дательном падеже («Михаилу Андреевичу»),
-                оперируя синтетическим профилем. Реальный клиент Соколов А.Д. остался <strong>абсолютно неизвестен</strong> для сторонней нейросети.
+                Обратите внимание: Агент оперирует исключительно синтетическим профилем клиента и склоняет его в нужных падежах.
+                Реальный клиент остаётся <strong>полностью изолированным</strong> в локальном хранилище.
               </div>
             </div>
           </div>
@@ -356,11 +362,11 @@
             <span class="metric-lbl">Статус демаскирования</span>
           </div>
           <div class="metric-pill pill-cyan">
-            <span class="metric-val" id="s5-fidelity">100.0%</span>
+            <span class="metric-val" id="s5-fidelity">100.0% (exact)</span>
             <span class="metric-lbl">Точность восстановления</span>
           </div>
           <div class="metric-pill pill-purple">
-            <span class="metric-val" id="s5-latency">0.8 мс</span>
+            <span class="metric-val" id="s5-latency">0.0 мс</span>
             <span class="metric-lbl">Время преобразования</span>
           </div>
           <div class="metric-pill pill-blue">
@@ -374,8 +380,8 @@
           <div class="panel-card">
             <div class="card-topbar">
               <div class="topbar-left">
-                <span class="badge-pill bg-purple">1. ОТВЕТ ОТ ОБЛАЧНОЙ LLM</span>
-                <span class="panel-caption">Синтетические псевдонимы</span>
+                <span class="badge-pill bg-purple">1. ОТВЕТ С ПСЕВДОНИМАМИ</span>
+                <span class="panel-caption">Синтетические реквизиты</span>
               </div>
             </div>
             <div class="card-inner-scrollable">
@@ -428,7 +434,7 @@
           <button class="slide-dot active" data-step="1" title="Шаг 1: Исходный текст"></button>
           <button class="slide-dot" data-step="2" title="Шаг 2: Детекция ПДн"></button>
           <button class="slide-dot" data-step="3" title="Шаг 3: Маскирование & Vault"></button>
-          <button class="slide-dot" data-step="4" title="Шаг 4: Ответ LLM"></button>
+          <button class="slide-dot" data-step="4" title="Шаг 4: Пример ответа"></button>
           <button class="slide-dot" data-step="5" title="Шаг 5: Восстановление"></button>
         </div>
         <div class="step-indicator-text" id="lbl-step-counter">Шаг 1 из 5</div>

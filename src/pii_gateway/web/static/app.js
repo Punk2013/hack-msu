@@ -6,17 +6,21 @@
 (() => {
   "use strict";
 
+  // Read Session Token injected into <meta name="pii-session">
+  const metaToken = document.querySelector('meta[name="pii-session"]');
+  const sessionToken = metaToken ? (metaToken.getAttribute("content") || "") : "";
+
   // Application State
   const state = {
     currentSlide: 1,
     totalSlides: 5,
     mode: "realistic", // "realistic" | "marker"
-    projectId: "presentation-deck",
     initialText: "",
     lastRunText: "",
     lastRunMode: "",
     presentationData: null,
     isLoading: false,
+    hasError: false,
     autoPlayTimer: null,
   };
 
@@ -39,6 +43,8 @@
     btnFullscreen: document.getElementById("btn-fullscreen"),
     btnAutoplay: document.getElementById("btn-autoplay"),
     lblAutoplay: document.getElementById("lbl-autoplay"),
+    errorBannerWrap: document.getElementById("error-banner-wrap"),
+    errorBannerText: document.getElementById("error-banner-text"),
 
     // Slide 2 elements
     s2Count: document.getElementById("s2-count"),
@@ -66,7 +72,7 @@
     s5Ribbon: document.getElementById("s5-transformations-ribbon"),
   };
 
-  // Default fallback text
+  // Fallback preset text
   const DEFAULT_PROMPT_DOC = `[ПРОМПТ ДЛЯ АВТОНОМНОГО АГЕНТА: ОБРАБОТКА ОБРАЩЕНИЯ И ПОДГОТОВКА ОТВЕТА]
 Инструкция: Проанализируй данные клиента и сформируй проект ответа.
 
@@ -78,6 +84,17 @@ Email: alex.sokolov@corporate.org
 
 Статус: Заявка одобрена. Алексею Дмитриевичу нужно предоставить оригиналы документов до 15.11.2026.
 Поручитель: Морозова Елена Васильевна (+7 903 555-44-33).`;
+
+  /**
+   * Helper to build authenticated API headers
+   */
+  function getHeaders() {
+    const headers = { "Content-Type": "application/json" };
+    if (sessionToken && !sessionToken.includes("__SESSION_TOKEN__")) {
+      headers["Authorization"] = `Bearer ${sessionToken}`;
+    }
+    return headers;
+  }
 
   /**
    * Initialize Presentation Deck
@@ -94,7 +111,7 @@ Email: alex.sokolov@corporate.org
    */
   async function loadInitialData() {
     try {
-      const res = await fetch("/api/cases");
+      const res = await fetch("/api/cases", { headers: getHeaders() });
       if (res.ok) {
         const cases = await res.json();
         if (cases && cases.length > 0) {
@@ -118,6 +135,8 @@ Email: alex.sokolov@corporate.org
     el.stepNavBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
         const step = parseInt(btn.dataset.step, 10);
+        // If error, do not allow jumping to steps 2..5
+        if (state.hasError && step > 1) return;
         goToSlide(step);
       });
     });
@@ -126,6 +145,7 @@ Email: alex.sokolov@corporate.org
     el.slideDots.forEach((dot) => {
       dot.addEventListener("click", () => {
         const step = parseInt(dot.dataset.step, 10);
+        if (state.hasError && step > 1) return;
         goToSlide(step);
       });
     });
@@ -134,18 +154,25 @@ Email: alex.sokolov@corporate.org
     el.btnPrev.addEventListener("click", () => prevSlide());
     el.btnNext.addEventListener("click", () => nextSlide());
     if (el.btnStep1Forward) {
-      el.btnStep1Forward.addEventListener("click", () => goToSlide(2));
+      el.btnStep1Forward.addEventListener("click", () => {
+        if (!state.hasError) goToSlide(2);
+      });
     }
 
-    // Source Editor Text Change
+    // Source Editor Text Change: immediately clear old stale outputs
     el.sourceEditor.addEventListener("input", () => {
       updateEditorMeta();
+      clearError();
+      clearSlideOutputs();
+      state.presentationData = null;
     });
 
     // Reset Text
     el.btnResetText.addEventListener("click", () => {
       el.sourceEditor.value = state.initialText;
       updateEditorMeta();
+      clearError();
+      clearSlideOutputs();
       state.presentationData = null;
     });
 
@@ -179,6 +206,65 @@ Email: alex.sokolov@corporate.org
   }
 
   /**
+   * Clear all outputs across slides 2..5 to avoid displaying stale data
+   */
+  function clearSlideOutputs() {
+    // Slide 2
+    if (el.s2Count) el.s2Count.textContent = "0";
+    if (el.s2Types) el.s2Types.textContent = "—";
+    if (el.s2Latency) el.s2Latency.textContent = "0.0 мс";
+    if (el.s2HighlightedText) el.s2HighlightedText.innerHTML = "";
+    if (el.s2SpansList) el.s2SpansList.innerHTML = "";
+
+    // Slide 3
+    if (el.s3MaskedText) el.s3MaskedText.innerHTML = "";
+    if (el.s3TableBody) el.s3TableBody.innerHTML = "";
+    if (el.s3CanaryBadge) el.s3CanaryBadge.textContent = "ОЖИДАНИЕ ОБРАБОТКИ";
+
+    // Slide 4
+    if (el.s4AgentText) el.s4AgentText.innerHTML = "";
+
+    // Slide 5
+    if (el.s5Status) el.s5Status.textContent = "STATUS: —";
+    if (el.s5Fidelity) el.s5Fidelity.textContent = "—";
+    if (el.s5Latency) el.s5Latency.textContent = "—";
+    if (el.s5Unresolved) el.s5Unresolved.textContent = "—";
+    if (el.s5FakesPreview) el.s5FakesPreview.innerHTML = "";
+    if (el.s5RestoredPreview) el.s5RestoredPreview.innerHTML = "";
+    if (el.s5Ribbon) el.s5Ribbon.innerHTML = "";
+  }
+
+  /**
+   * Show visible error banner and block forward progression
+   */
+  function showError(msg) {
+    state.hasError = true;
+    clearSlideOutputs();
+    state.presentationData = null;
+
+    if (el.errorBannerWrap && el.errorBannerText) {
+      el.errorBannerText.textContent = msg;
+      el.errorBannerWrap.style.display = "block";
+    }
+
+    if (el.btnNext) el.btnNext.disabled = true;
+    if (el.btnStep1Forward) el.btnStep1Forward.disabled = true;
+    goToSlide(1);
+  }
+
+  /**
+   * Clear error state and enable controls
+   */
+  function clearError() {
+    state.hasError = false;
+    if (el.errorBannerWrap) {
+      el.errorBannerWrap.style.display = "none";
+    }
+    if (el.btnNext) el.btnNext.disabled = false;
+    if (el.btnStep1Forward) el.btnStep1Forward.disabled = false;
+  }
+
+  /**
    * Switch Active Mode
    */
   function setMode(newMode) {
@@ -187,8 +273,9 @@ Email: alex.sokolov@corporate.org
     el.btnModeRealistic.classList.toggle("active", newMode === "realistic");
     el.btnModeMarker.classList.toggle("active", newMode === "marker");
 
-    // Force rerun presentation pipeline with new mode
     state.presentationData = null;
+    clearSlideOutputs();
+    clearError();
     if (state.currentSlide > 1) {
       runPresentationPipeline();
     }
@@ -199,15 +286,19 @@ Email: alex.sokolov@corporate.org
    */
   async function generateNewCase() {
     el.btnGenerateCase.classList.add("loading");
+    clearError();
+    clearSlideOutputs();
     try {
-      const res = await fetch("/api/cases/generate", { method: "POST" });
+      const res = await fetch("/api/cases/generate", {
+        method: "POST",
+        headers: getHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         el.sourceEditor.value = data.content;
         updateEditorMeta();
         state.presentationData = null;
 
-        // If on slide 1, brief glow; if on slide 2..5, refresh active view
         if (state.currentSlide > 1) {
           await runPresentationPipeline();
         }
@@ -224,6 +315,7 @@ Email: alex.sokolov@corporate.org
    */
   async function goToSlide(stepNumber) {
     if (stepNumber < 1 || stepNumber > state.totalSlides) return;
+    if (state.hasError && stepNumber > 1) return;
 
     state.currentSlide = stepNumber;
 
@@ -255,7 +347,7 @@ Email: alex.sokolov@corporate.org
     } else if (stepNumber === 2) {
       el.lblNextBtn.textContent = "Маскирование & Vault ➔";
     } else if (stepNumber === 3) {
-      el.lblNextBtn.textContent = "Ответ LLM ➔";
+      el.lblNextBtn.textContent = "Пример ответа ➔";
     } else if (stepNumber === 4) {
       el.lblNextBtn.textContent = "Восстановление ➔";
     } else if (stepNumber === 5) {
@@ -266,12 +358,17 @@ Email: alex.sokolov@corporate.org
     const currentText = el.sourceEditor.value || "";
     if (stepNumber >= 2) {
       if (!state.presentationData || state.lastRunText !== currentText || state.lastRunMode !== state.mode) {
-        await runPresentationPipeline();
+        const ok = await runPresentationPipeline();
+        if (!ok) {
+          // Pipeline failed: revert to slide 1
+          goToSlide(1);
+        }
       }
     }
   }
 
   function nextSlide() {
+    if (state.hasError) return;
     if (state.currentSlide < state.totalSlides) {
       goToSlide(state.currentSlide + 1);
     } else {
@@ -289,36 +386,45 @@ Email: alex.sokolov@corporate.org
    * Run 5-step pipeline via backend API
    */
   async function runPresentationPipeline() {
-    if (state.isLoading) return;
+    if (state.isLoading) return false;
     state.isLoading = true;
 
     const textToProcess = el.sourceEditor.value || "";
     try {
       const res = await fetch("/api/presentation/run", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify({
           text: textToProcess,
           mode: state.mode,
-          project_id: state.projectId,
         }),
       });
 
       if (!res.ok) {
-        throw new Error(`Server returned HTTP ${res.status}`);
+        let errDetail = "Обработка отклонена локальным движком (Fail-Closed).";
+        try {
+          const errData = await res.json();
+          if (errData && errData.detail) errDetail = errData.detail;
+        } catch (_) {}
+        showError(`⚠️ Отказ шлюза: ${errDetail} Старые результаты очищены, переход заблокирован.`);
+        return false;
       }
 
       const data = await res.json();
       state.presentationData = data;
       state.lastRunText = textToProcess;
       state.lastRunMode = state.mode;
+      clearError();
 
       renderSlide2(data.step2);
       renderSlide3(data.step3);
       renderSlide4(data.step4);
       renderSlide5(data.step5);
+      return true;
     } catch (err) {
       console.error("Pipeline run error:", err);
+      showError("⚠️ Ошибка сети или соединения с сервером шлюза.");
+      return false;
     } finally {
       state.isLoading = false;
     }
@@ -335,7 +441,6 @@ Email: alex.sokolov@corporate.org
     el.s2Latency.textContent = `${step2.detect_latency_ms} мс`;
     el.s2HighlightedText.innerHTML = step2.highlighted_html;
 
-    // Render spans breakdown cards
     if (!step2.spans || step2.spans.length === 0) {
       el.s2SpansList.innerHTML = `<div class="span-meta">Персональные данные не обнаружены.</div>`;
       return;
@@ -358,22 +463,17 @@ Email: alex.sokolov@corporate.org
   }
 
   /**
-   * Render Slide 3: Masked Outbound Context & Vault Table
+   * Render Slide 3: Masked Context & Vault Table
    */
   function renderSlide3(step3) {
     el.s3MaskedText.innerHTML = step3.masked_highlighted_html;
 
-    if (step3.canary_leak) {
-      el.s3CanaryBadge.textContent = "🚨 УТЕЧКА КАНАРЕЙКИ!";
-      el.s3CanaryBadge.style.color = "#ef4444";
-      el.s3CanaryBadge.style.borderColor = "#ef4444";
-    } else {
-      el.s3CanaryBadge.textContent = "✓ 0 УТЕЧЕК (CANARY CLEAN)";
+    if (el.s3CanaryBadge) {
+      el.s3CanaryBadge.textContent = "✓ ВСЕ НАЙДЕННЫЕ СУЩНОСТИ ЗАМЕНЕНЫ";
       el.s3CanaryBadge.style.color = "#34d399";
       el.s3CanaryBadge.style.borderColor = "rgba(16, 185, 129, 0.4)";
     }
 
-    // Vault Table Rows
     if (!step3.entities_table || step3.entities_table.length === 0) {
       el.s3TableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding: 20px;">Нет сущностей для отображения.</td></tr>`;
       return;
@@ -395,7 +495,7 @@ Email: alex.sokolov@corporate.org
   }
 
   /**
-   * Render Slide 4: Autonomous Agent (LLM) Output
+   * Render Slide 4: Autonomous Agent Answer Sample
    */
   function renderSlide4(step4) {
     el.s4AgentText.innerHTML = step4.agent_output_highlighted_html;
@@ -405,21 +505,19 @@ Email: alex.sokolov@corporate.org
   }
 
   /**
-   * Render Slide 5: Restoration (Demasking) & Morph Transformations
+   * Render Slide 5: Restoration (Demasking) & Transformations Ribbon
    */
   function renderSlide5(step5) {
     el.s5Status.textContent = `STATUS: ${(step5.status || "COMPLETE").toUpperCase()}`;
-    el.s5Fidelity.textContent = `${step5.fidelity_pct}%`;
+    el.s5Fidelity.textContent = step5.is_complete ? "100.0% (exact)" : "Неполное";
     el.s5Latency.textContent = `${step5.restore_latency_ms} мс`;
     el.s5Unresolved.textContent = step5.unresolved_count === 0 ? "0 ОШИБОК" : `${step5.unresolved_count} НЕ СОВПАЛО`;
 
-    // Before (with fakes) and After (Restored) previews
     if (state.presentationData && state.presentationData.step4) {
       el.s5FakesPreview.innerHTML = state.presentationData.step4.agent_output_highlighted_html;
     }
     el.s5RestoredPreview.innerHTML = step5.restored_highlighted_html;
 
-    // Transformations Ribbon
     if (!step5.transformations || step5.transformations.length === 0) {
       el.s5Ribbon.innerHTML = `<span class="span-meta">Трансформации не производились.</span>`;
       return;
@@ -440,19 +538,17 @@ Email: alex.sokolov@corporate.org
    * Keyboard shortcuts handler
    */
   function handleKeyDown(e) {
-    // If focus is in editable textarea on Slide 1
     const inTextarea = (document.activeElement === el.sourceEditor);
 
     if (inTextarea) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         el.sourceEditor.blur();
-        goToSlide(2);
+        if (!state.hasError) goToSlide(2);
       }
       return;
     }
 
-    // Global Keynotes Navigation
     if (e.key === " " || e.key === "ArrowRight") {
       e.preventDefault();
       nextSlide();

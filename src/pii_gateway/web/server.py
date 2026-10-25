@@ -1,77 +1,63 @@
-"""FastAPI server for the PII Gateway interactive presentation dashboard & test harness."""
+"""Same-origin local inspector and 5-step presentation deck.
+No upstream calls and no arbitrary vault access.
+"""
 
 from __future__ import annotations
 
-import difflib
 import html
 import random
 import re
+import secrets
 import time
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pymorphy3
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from pii_gateway.core.types import Context, PiiType
-from pii_gateway.detect.detector import detect
-from pii_gateway.pseudo.engine import mask, restore
+from pii_gateway.core.types import Context
+from pii_gateway.detect import detect
+from pii_gateway.pseudo import mask, restore
 from pii_gateway.pseudo.fakes import fake_email, fake_passport, fake_phone
-from pii_gateway.vault.storage import Vault, get_vault_path
+from pii_gateway.vault.storage import Vault
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC = Path(__file__).with_name("static")
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-BENCH_DIR = PROJECT_ROOT / "bench"
 DEMO_CLIENTS_DIR = PROJECT_ROOT / "demo" / "clients"
 
 morph = pymorphy3.MorphAnalyzer()
 
-app = FastAPI(
-    title="PII Gateway Interactive Showcase & Test Harness",
-    description="Interactive visual demonstration of Zero-Trust PII Gateway for autonomous agents.",
-    version="1.1.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# In-memory storage for user-customized cases
-USER_CUSTOM_CASES: dict[str, dict[str, str]] = {}
-
 SURNAMES_M = [
     "Иванов", "Смирнов", "Кузнецов", "Попов", "Васильев", "Петров",
     "Соколов", "Михайлов", "Новиков", "Федоров", "Морозов", "Волков",
-    "Алексеев", "Лебедев", "Семенов", "Егоров", "Павлов", "Козлов"
+    "Алексеев", "Лебедев", "Семенов", "Егоров", "Павлов", "Козлов",
 ]
 NAMES_M = [
     "Иван", "Алексей", "Дмитрий", "Сергей", "Михаил", "Андрей",
-    "Павел", "Роман", "Олег", "Николай", "Виктор", "Антон", "Кирилл"
+    "Павел", "Роман", "Олег", "Николай", "Виктор", "Антон", "Кирилл",
 ]
 PATRS_M = [
     "Петрович", "Сергеевич", "Алексеевич", "Иванович", "Дмитриевич",
-    "Николаевич", "Михайлович", "Андреевич", "Павлович", "Романович"
+    "Николаевич", "Михайлович", "Андреевич", "Павлович", "Романович",
 ]
 
 SURNAMES_F = [
     "Иванова", "Смирнова", "Кузнецова", "Попова", "Васильева", "Петрова",
-    "Соколова", "Михайлова", "Новикова", "Морозова", "Волкова", "Алексеева"
+    "Соколова", "Михайлова", "Новикова", "Морозова", "Волкова", "Алексеева",
 ]
 NAMES_F = [
     "Анна", "Елена", "Ольга", "Татьяна", "Ирина", "Мария",
-    "Светлана", "Екатерина", "Наталья", "Ксения", "Полина", "Дарья"
+    "Светлана", "Екатерина", "Наталья", "Ксения", "Полина", "Дарья",
 ]
 PATRS_F = [
     "Сергеевна", "Алексеевна", "Ивановна", "Дмитриевна",
-    "Николаевна", "Михайловна", "Петровна", "Андреевна"
+    "Николаевна", "Михайловна", "Петровна", "Андреевна",
 ]
 
 SCENARIO_TEMPLATES = [
@@ -169,397 +155,16 @@ def _generate_synthetic_case() -> dict[str, str]:
     }
 
 
-class ProcessRequest(BaseModel):
-    text: str
-    mode: str = "realistic"  # "realistic" | "marker"
-    project_id: str = "showcase-demo"
-
-
-class RestoreRequest(BaseModel):
-    text: str
-    project_id: str = "showcase-demo"
-    mode: str = "realistic"
-
-
-class HarnessRunRequest(BaseModel):
-    text: str
-    mode: str = "realistic"  # "realistic" | "marker"
-    project_id: str = "harness-demo"
-    llm_prompt: str | None = None
-    fail_closed_injection: bool = False  # simulate failure to verify fail-closed defense
+class TextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    text: str = Field(min_length=1, max_length=100_000)
+    mode: Literal["realistic", "marker"] = "realistic"
 
 
 class PresentationRunRequest(BaseModel):
-    text: str
-    mode: str = "realistic"  # "realistic" | "marker"
-    project_id: str = "presentation-demo"
-
-
-# Mount static assets
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-
-@app.get("/")
-def get_index():
-    index_file = STATIC_DIR / "index.html"
-    if not index_file.exists():
-        raise HTTPException(status_code=404, detail="Frontend static index.html not found.")
-    return FileResponse(str(index_file))
-
-
-@app.get("/api/health")
-def api_health() -> dict[str, Any]:
-    return {
-        "status": "healthy",
-        "service": "pii-gateway-harness",
-        "engine_version": "1.1.0",
-        "supported_types": [PiiType.PERSON, PiiType.EMAIL, PiiType.PHONE, PiiType.PASSPORT_RU],
-    }
-
-
-@app.get("/api/cases")
-def api_get_cases() -> list[dict[str, str]]:
-    """Return all dynamic and filesystem test cases."""
-    cases = []
-
-    # 0. Primary Realistic Autonomous Agent Prompt & Customer Card
-    cases.append({
-        "id": "agent_primary_demo",
-        "title": "🤖 Промпт для агента: Кредитная заявка и клиент",
-        "filename": "agent_primary_demo.txt",
-        "content": (
-            "[ПРОМПТ ДЛЯ АВТОНОМНОГО АГЕНТА: ОБРАБОТКА ОБРАЩЕНИЯ И ПОДГОТОВКА ОТВЕТА]\n"
-            "Инструкция: Проанализируй данные клиента и сформируй проект ответа.\n\n"
-            "[ВХОДНОЙ ДОКУМЕНТ: КАРТОЧКА КЛИЕНТА ИЗ CRM]\n"
-            "ФИО: Соколов Алексей Дмитриевич\n"
-            "Email: alex.sokolov@corporate.org\n"
-            "Телефон: +7 916 123-45-67\n"
-            "Паспорт: 45 10 987654\n\n"
-            "Статус: Заявка одобрена. Алексею Дмитриевичу нужно предоставить "
-            "оригиналы документов до 15.11.2026.\n"
-            "Поручитель: Морозова Елена Васильевна (+7 903 555-44-33)."
-        ),
-    })
-
-    # 1. Read files from demo/clients
-    if DEMO_CLIENTS_DIR.exists():
-        for f in sorted(DEMO_CLIENTS_DIR.glob("*.txt")):
-            cases.append({
-                "id": f.stem,
-                "title": f"📁 Карточка {f.stem.upper()}",
-                "filename": f.name,
-                "content": f.read_text(encoding="utf-8"),
-            })
-
-    # 2. Add rich pre-configured agreement case
-    cases.append({
-        "id": "loan_agreement",
-        "title": "📑 Договор займа и паспорт РФ",
-        "filename": "agreement.txt",
-        "content": (
-            "ДОГОВОР ЗАЙМА № 482/26-К\n"
-            "Заемщик: Соколов Алексей Дмитриевич, паспорт РФ 45 10 987654.\n"
-            "Контактный телефон: +7 916 123-45-67, эл. почта: alex.sokolov@corporate.org.\n"
-            "Поручитель: Морозова Елена Васильевна (+7 903 555-44-33).\n"
-            "Обязательство: Алексею Дмитриевичу предоставить оригиналы справок до 15.11.2026."
-        ),
-    })
-
-    # 3. Add declension case
-    cases.append({
-        "id": "support_ticket",
-        "title": "✍️ Падежи в деловой переписке",
-        "filename": "ticket.txt",
-        "content": (
-            "Обращение в поддержку от клиента: Волков Сергей Николаевич.\n"
-            "Связаться с Волковым Сергеем Николаевичем по номеру +7 812 200-30-40.\n"
-            "Ответ подготовлен для Волкова Сергея Николаевича менеджером.\n"
-            "Копию акта отправить Сергею Николаевичу на sergey.volkov@domain.ru."
-        ),
-    })
-
-    # 4. User-created cases
-    for c in USER_CUSTOM_CASES.values():
-        cases.append(c)
-
-    return cases
-
-
-@app.post("/api/cases/generate")
-def api_generate_case() -> dict[str, str]:
-    """Generate a fresh randomized realistic Russian customer case."""
-    case = _generate_synthetic_case()
-    USER_CUSTOM_CASES[case["id"]] = case
-    return case
-
-
-@app.post("/api/cases/save")
-def api_save_case(case_data: dict[str, str]) -> dict[str, Any]:
-    """Save an edited or custom test case."""
-    c_id = case_data.get("id") or f"custom_{int(time.time())}"
-    title = case_data.get("title") or "Пользовательский кейс"
-    content = case_data.get("content") or ""
-    saved = {
-        "id": c_id,
-        "title": title,
-        "filename": f"{c_id}.txt",
-        "content": content,
-    }
-    USER_CUSTOM_CASES[c_id] = saved
-    return {"success": True, "case": saved}
-
-
-@app.post("/api/harness/run")
-def api_run_harness(req: HarnessRunRequest) -> dict[str, Any]:
-    """Full execution harness revealing every intermediate layer."""
-    t_start = time.perf_counter()
-    ctx = Context(project_id=req.project_id, mode=req.mode)
-
-    # -------------------------------------------------------------------------
-    # Layer 1: Input Document & Metadata
-    # -------------------------------------------------------------------------
-    layer1 = {
-        "id": "layer-1-input",
-        "name": "1. Входной документ (Agent Context)",
-        "badge": "UNTRUSTED WORKSPACE",
-        "color": "#a855f7",
-        "text": req.text,
-        "char_count": len(req.text),
-        "line_count": len(req.text.splitlines()),
-    }
-
-    # Optional Fail-Closed Injection
-    if req.fail_closed_injection:
-        return {
-            "fail_closed_triggered": True,
-            "error_message": "CRITICAL: Injected detector exception: simulated security abort.",
-            "layers": [
-                layer1,
-                {
-                    "id": "layer-2-detect",
-                    "name": "2. Слой детекции (FAIL-CLOSED)",
-                    "badge": "DETECT ERROR INJECTED",
-                    "color": "#ef4444",
-                    "error": "DetectError('Injected detector fault: fail-closed triggered')",
-                    "latency_ms": 1.2,
-                },
-                {
-                    "id": "layer-4-mask",
-                    "name": "4. Исходящий запрос к Upstream",
-                    "badge": "0 BYTES SENT",
-                    "color": "#ef4444",
-                    "sent_to_provider": False,
-                    "upstream_request_payload": None,
-                    "canary_check": {
-                        "verdict": "ABORTED",
-                        "leaks_detected": 0,
-                        "bytes_sent": 0,
-                    },
-                    "note": (
-                        "Защита Gateway сработала: при любом сбое детектора или vault "
-                        "запрос НЕМЕДЛЕННО блокируется, провайдеру отправлено 0 байт."
-                    ),
-                },
-            ],
-            "total_latency_ms": 1.5,
-            "roundtrip_accuracy_pct": 0.0,
-            "security_verdict": "FAIL-CLOSED (NO LEAKS)",
-        }
-
-    # -------------------------------------------------------------------------
-    # Layer 2: Detection Layer (NER & Regex Spans)
-    # -------------------------------------------------------------------------
-    t_detect_start = time.perf_counter()
-    spans = detect(req.text, ctx)
-    t_detect = (time.perf_counter() - t_detect_start) * 1000
-
-    ui_spans = []
-    for s in spans:
-        ui_spans.append({
-            "start": s.start,
-            "end": s.end,
-            "type": str(s.type),
-            "raw_text": s.raw_text,
-            "detector": s.detector,
-            "confidence": s.confidence or 1.0,
-        })
-
-    layer2 = {
-        "id": "layer-2-detect",
-        "name": "2. Детекция сущностей (NER & Regex)",
-        "badge": f"{len(spans)} PII SPANS",
-        "color": "#38bdf8",
-        "latency_ms": round(t_detect, 2),
-        "spans": ui_spans,
-        "spans_count": len(spans),
-    }
-
-    # -------------------------------------------------------------------------
-    # Layer 3: Vault Security & Mapping Lookup (SQLite 0600)
-    # -------------------------------------------------------------------------
-    t_mask_start = time.perf_counter()
-    masked = mask(req.text, spans, ctx)
-    t_mask = (time.perf_counter() - t_mask_start) * 1000
-
-    vault_entities: list[dict[str, Any]] = []
-    vault_pairs: list[dict[str, Any]] = []
-    vault_stats: dict[str, Any] = {}
-    db_path = get_vault_path(req.project_id)
-
-    if db_path.exists():
-        with Vault(req.project_id) as v:
-            vault_stats = v.get_stats()
-            vault_entities = v.list_entities()
-            conn = v._get_connection()
-            rows = conn.execute(
-                "SELECT replacement, original, entity_id FROM pairs ORDER BY entity_id"
-            ).fetchall()
-            vault_pairs = [
-                {
-                    "replacement": str(r["replacement"]),
-                    "original": str(r["original"]),
-                    "entity_id": str(r["entity_id"]),
-                }
-                for r in rows
-            ]
-
-    layer3 = {
-        "id": "layer-3-vault",
-        "name": "3. Изолированное хранилище Vault (SQLite 0600)",
-        "badge": "0600 PERMISSIONS",
-        "color": "#818cf8",
-        "project_id": req.project_id,
-        "db_path": str(db_path),
-        "entities": vault_entities,
-        "pairs": vault_pairs,
-        "stats": vault_stats,
-    }
-
-    # -------------------------------------------------------------------------
-    # Layer 4: Outbound Transformation & Upstream Wire Request
-    # -------------------------------------------------------------------------
-    # Upstream spy canary scan: verify that none of the original values appear
-    canary_leak_found = False
-    original_values = [s.raw_text for s in spans]
-    for orig in original_values:
-        if orig in masked.text and len(orig) > 3:
-            canary_leak_found = True
-            break
-
-    wire_request_body = {
-        "model": "qwen2.5:7b",
-        "messages": [
-            {"role": "system", "content": "You are a professional customer support assistant."},
-            {
-                "role": "user",
-                "content": req.llm_prompt or "Напиши персональное уведомление клиенту.",
-            },
-            {"role": "tool", "content": masked.text},
-        ],
-        "stream": False,
-    }
-
-    layer4 = {
-        "id": "layer-4-mask",
-        "name": "4. Маскирование и исходящий запрос (Upstream Wire)",
-        "badge": "0 LEAKS DETECTED" if not canary_leak_found else "LEAK DETECTED",
-        "color": "#10b981" if not canary_leak_found else "#ef4444",
-        "latency_ms": round(t_mask, 2),
-        "masked_text": masked.text,
-        "wire_request": wire_request_body,
-        "canary_check": {
-            "verdict": "CLEAN (0 LEAKS)" if not canary_leak_found else "LEAK",
-            "checked_values": len(original_values),
-            "leaks_found": 1 if canary_leak_found else 0,
-        },
-    }
-
-    # -------------------------------------------------------------------------
-    # Layer 5: Upstream Mock / Model Reply Generation
-    # -------------------------------------------------------------------------
-    model_response_text = _generate_model_reply(masked.text, req.mode)
-    wire_response_body = {
-        "id": f"chatcmpl-{int(time.time())}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": "qwen2.5:7b",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": model_response_text,
-                },
-                "finish_reason": "stop",
-            }
-        ],
-    }
-
-    layer5 = {
-        "id": "layer-5-upstream",
-        "name": "5. Ответ облачной модели (Upstream Response)",
-        "badge": "NATURAL RUSSIAN INFLECTION",
-        "color": "#a855f7",
-        "raw_response_text": model_response_text,
-        "wire_response": wire_response_body,
-    }
-
-    # -------------------------------------------------------------------------
-    # Layer 6: Inbound Restoration Layer (Reverse Pseudonymization)
-    # -------------------------------------------------------------------------
-    t_restore_start = time.perf_counter()
-    restored_model_reply = restore(model_response_text, ctx)
-    t_restore = (time.perf_counter() - t_restore_start) * 1000
-
-    # Also test exact roundtrip on input document
-    roundtrip_result = restore(masked.text, ctx)
-    is_exact_roundtrip = roundtrip_result.text == req.text
-
-    layer6 = {
-        "id": "layer-6-restore",
-        "name": "6. Обратное восстановление (Reverse Mapping)",
-        "badge": f"STATUS: {restored_model_reply.status.upper()}",
-        "color": "#f59e0b",
-        "latency_ms": round(t_restore, 2),
-        "status": str(restored_model_reply.status),
-        "unresolved": [
-            {"start": u.start, "end": u.end, "reason": str(u.reason)}
-            for u in restored_model_reply.unresolved
-        ],
-        "restored_model_reply": restored_model_reply.text,
-    }
-
-    # -------------------------------------------------------------------------
-    # Layer 7: Final Document & Side-by-Side Diff
-    # -------------------------------------------------------------------------
-    diff_html = _compute_token_diff(req.text, roundtrip_result.text)
-
-    layer7 = {
-        "id": "layer-7-verify",
-        "name": "7. Итоговый файл клиенту и Diff-контроль",
-        "badge": "100.0% ROUNDTRIP FIDELITY" if is_exact_roundtrip else "PARTIAL",
-        "color": "#10b981",
-        "is_perfect_roundtrip": is_exact_roundtrip,
-        "restored_final_document": restored_model_reply.text,
-        "diff_html": diff_html,
-    }
-
-    total_latency = (time.perf_counter() - t_start) * 1000
-
-    return {
-        "fail_closed_triggered": False,
-        "layers": [layer1, layer2, layer3, layer4, layer5, layer6, layer7],
-        "total_latency_ms": round(total_latency, 2),
-        "roundtrip_accuracy_pct": 100.0 if is_exact_roundtrip else 0.0,
-        "security_verdict": "VERIFIED (0 LEAKS, 100% FIDELITY)",
-        "latencies": {
-            "detect_ms": round(t_detect, 2),
-            "mask_ms": round(t_mask, 2),
-            "restore_ms": round(t_restore, 2),
-            "total_ms": round(total_latency, 2),
-        },
-    }
+    model_config = ConfigDict(extra="forbid", strict=True)
+    text: str = Field(min_length=1, max_length=100_000)
+    mode: Literal["realistic", "marker"] = "realistic"
 
 
 def _generate_model_reply(
@@ -636,8 +241,7 @@ def _generate_model_reply(
                 f"Здравствуйте!\n\n"
                 f"Уведомление подготовлено для {datv_form}.\n"
                 f"Уважаемый {name} {patr}!\n"
-                f"Информируем, что ваш договор успешно подтверждён. Напоминаем о необходимости "
-                f"сохранять указанные контакты для получения статуса операций.\n\n"
+                f"Информируем, что ваш договор успешно подтверждён.\n\n"
                 f"С уважением, персональный менеджер."
             )
 
@@ -804,7 +408,6 @@ def _build_entities_table(
     spans: list[Any],
     masked: Any,
     vault_pairs: dict[str, str],
-    vault_entities: list[dict[str, Any]],
     mode: str,
 ) -> list[dict[str, Any]]:
     """Construct clean entity table for Step 3."""
@@ -848,259 +451,244 @@ def _build_entities_table(
     return table
 
 
-@app.post("/api/presentation/run")
-def api_presentation_run(req: PresentationRunRequest) -> dict[str, Any]:
-    """Execute the full 5-step presentation workflow."""
-    t_start = time.perf_counter()
-    ctx = Context(project_id=req.project_id, mode=req.mode)
+def create_app() -> FastAPI:
+    """Run through `python -m pii_gateway.web` for an isolated temporary vault."""
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    token = secrets.token_urlsafe(32)
+    project = "playground-" + secrets.token_hex(16)
 
-    # Purge previous vault state for fresh clean run
-    db_path = get_vault_path(req.project_id)
-    if db_path.exists():
-        with Vault(req.project_id) as v:
-            v.purge()
-
-    # Step 1: Input text metadata
-    step1 = {
-        "text": req.text,
-        "char_count": len(req.text),
-        "line_count": len(req.text.splitlines()),
-        "word_count": len(req.text.split()),
-    }
-
-    # Step 2: Detection
-    t_det_start = time.perf_counter()
-    spans = detect(req.text, ctx)
-    t_detect = (time.perf_counter() - t_det_start) * 1000
-
-    ui_spans = []
-    for s in spans:
-        ui_spans.append({
-            "start": s.start,
-            "end": s.end,
-            "type": str(s.type).split(".")[-1],
-            "raw_text": s.raw_text,
-            "detector": s.detector,
-            "confidence": s.confidence or 1.0,
-        })
-
-    step2_html = _render_highlighted_spans(req.text, spans)
-    step2 = {
-        "text": req.text,
-        "spans": ui_spans,
-        "spans_count": len(spans),
-        "types_detected": sorted(list({s["type"] for s in ui_spans})),
-        "highlighted_html": step2_html,
-        "detect_latency_ms": round(t_detect, 2),
-    }
-
-    # Step 3: Masking & Vault
-    t_mask_start = time.perf_counter()
-    masked = mask(req.text, spans, ctx)
-    t_mask = (time.perf_counter() - t_mask_start) * 1000
-
-    vault_pairs: dict[str, str] = {}
-    vault_entities: list[dict[str, Any]] = []
-    if db_path.exists():
-        with Vault(req.project_id) as v:
-            vault_pairs = v.get_pairs()
-            vault_entities = v.list_entities()
-
-    entities_table = _build_entities_table(spans, masked, vault_pairs, vault_entities, req.mode)
-    canary_leak = any(s.raw_text in masked.text and len(s.raw_text) > 3 for s in spans)
-    step3_html = _render_masked_html(masked.text, vault_pairs, req.mode)
-
-    step3 = {
-        "masked_text": masked.text,
-        "masked_highlighted_html": step3_html,
-        "entities_table": entities_table,
-        "vault_pairs_count": len(vault_pairs),
-        "canary_leak": canary_leak,
-        "mask_latency_ms": round(t_mask, 2),
-    }
-
-    # Step 4: Model Reply
-    model_response_text = _generate_model_reply(masked.text, req.mode, vault_pairs)
-    step4_html, pseudonyms_used = _render_agent_output_html(
-        model_response_text, vault_pairs, req.mode
-    )
-
-    step4 = {
-        "agent_output_text": model_response_text,
-        "agent_output_highlighted_html": step4_html,
-        "pseudonyms_used": pseudonyms_used,
-        "model_name": "Autonomous Agent Worker (LLM Upstream)",
-    }
-
-    # Step 5: Restore
-    t_rest_start = time.perf_counter()
-    restored_reply = restore(model_response_text, ctx)
-    t_restore = (time.perf_counter() - t_rest_start) * 1000
-
-    transformations = _extract_transformations(
-        model_response_text, restored_reply.text, vault_pairs
-    )
-    step5_html = _render_restored_html(restored_reply.text, transformations)
-
-    step5 = {
-        "restored_text": restored_reply.text,
-        "restored_highlighted_html": step5_html,
-        "status": str(restored_reply.status),
-        "unresolved_count": len(restored_reply.unresolved),
-        "fidelity_pct": 100.0 if not restored_reply.unresolved else 85.0,
-        "restore_latency_ms": round(t_restore, 2),
-        "transformations": transformations,
-    }
-
-    total_latency = (time.perf_counter() - t_start) * 1000
-
-    return {
-        "step1": step1,
-        "step2": step2,
-        "step3": step3,
-        "step4": step4,
-        "step5": step5,
-        "mode": req.mode,
-        "total_latency_ms": round(total_latency, 2),
-    }
-
-
-def _compute_token_diff(orig: str, restored: str) -> str:
-    """Token-level side-by-side comparison."""
-    tokens_orig = re.findall(r"\w+|\W+", orig)
-    tokens_rest = re.findall(r"\w+|\W+", restored)
-
-    matcher = difflib.SequenceMatcher(None, tokens_orig, tokens_rest, autojunk=False)
-    html_parts = []
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
-        sub_rest = html.escape("".join(tokens_rest[j1:j2]))
-        if tag == "equal":
-            html_parts.append(sub_rest)
+    @app.middleware("http")
+    async def protect(request: Request, call_next):
+        origin = request.headers.get("origin")
+        host = request.headers.get("host", "")
+        expected_origin = f"{request.url.scheme}://{host}"
+        if (origin is not None and origin != expected_origin) or request.headers.get(
+            "sec-fetch-site"
+        ) == "cross-site":
+            response = JSONResponse({"detail": "Cross-origin access is not allowed"}, 403)
+        elif request.url.path.startswith("/api/") and not secrets.compare_digest(
+            request.headers.get("authorization", "").encode(), f"Bearer {token}".encode()
+        ):
+            response = JSONResponse({"detail": "Local session authorization required"}, 401)
         else:
-            html_parts.append(f"<span class='diff-restored'>{sub_rest}</span>")
-    return "".join(html_parts)
-
-
-@app.post("/api/process")
-def api_process(req: ProcessRequest) -> dict[str, Any]:
-    ctx = Context(project_id=req.project_id, mode=req.mode)
-
-    t0 = time.perf_counter()
-    spans = detect(req.text, ctx)
-    t_detect = (time.perf_counter() - t0) * 1000
-
-    t1 = time.perf_counter()
-    masked = mask(req.text, spans, ctx)
-    t_mask = (time.perf_counter() - t1) * 1000
-
-    vault_stats: dict[str, Any] = {}
-    db_path = get_vault_path(req.project_id)
-    if db_path.exists():
-        with Vault(req.project_id) as v:
-            vault_stats = v.get_stats()
-
-    ui_spans = []
-    for s in spans:
-        ui_spans.append({
-            "start": s.start,
-            "end": s.end,
-            "type": str(s.type),
-            "raw_text": s.raw_text,
-            "detector": s.detector,
-            "confidence": s.confidence or 1.0,
+            response = await call_next(request)
+        response.headers.update({
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": (
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; "
+                "frame-ancestors 'none'; form-action 'self'"
+            ),
         })
+        return response
 
-    return {
-        "original_text": req.text,
-        "masked_text": masked.text,
-        "mode": req.mode,
-        "spans": ui_spans,
-        "detect_latency_ms": round(t_detect, 2),
-        "mask_latency_ms": round(t_mask, 2),
-        "total_latency_ms": round(t_detect + t_mask, 2),
-        "vault_stats": vault_stats,
-    }
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
+    @app.exception_handler(RequestValidationError)
+    async def invalid_input(request, exc):
+        return JSONResponse({"detail": "Нужны текст до 100 000 символов и допустимый режим."}, 422)
 
-@app.post("/api/restore")
-def api_restore(req: RestoreRequest) -> dict[str, Any]:
-    ctx = Context(project_id=req.project_id, mode=req.mode)
+    @app.get("/", response_class=HTMLResponse)
+    def index():
+        html_path = STATIC / "index.html"
+        if not html_path.exists():
+            return HTMLResponse("<h1>UI not found</h1>", 404)
+        content = html_path.read_text(encoding="utf-8")
+        return content.replace("__SESSION_TOKEN__", token)
 
-    t0 = time.perf_counter()
-    restored = restore(req.text, ctx)
-    t_restore = (time.perf_counter() - t0) * 1000
-
-    return {
-        "restored_text": restored.text,
-        "status": str(restored.status),
-        "restore_latency_ms": round(t_restore, 2),
-    }
-
-
-@app.get("/api/vault")
-def api_get_vault(project_id: str = "showcase-demo") -> dict[str, Any]:
-    db_path = get_vault_path(project_id)
-    if not db_path.exists():
+    @app.get("/api/health")
+    def api_health() -> dict[str, Any]:
         return {
-            "exists": False,
-            "project_id": project_id,
-            "stats": {},
-            "entities": [],
-            "pairs": [],
+            "status": "healthy",
+            "service": "pii-gateway-presentation",
+            "scope": "local_inspection_only",
         }
 
-    with Vault(project_id) as v:
-        stats = v.get_stats()
-        entities = v.list_entities()
-        conn = v._get_connection()
-        rows = conn.execute(
-            "SELECT replacement, original, entity_id FROM pairs ORDER BY entity_id"
-        ).fetchall()
-        pairs = [
+    @app.get("/api/cases")
+    def api_get_cases() -> list[dict[str, str]]:
+        cases = []
+        cases.append({
+            "id": "agent_primary_demo",
+            "title": "🤖 Промпт для агента: Кредитная заявка и клиент",
+            "filename": "agent_primary_demo.txt",
+            "content": (
+                "[ПРОМПТ ДЛЯ АВТОНОМНОГО АГЕНТА: ОБРАБОТКА ОБРАЩЕНИЯ И ПОДГОТОВКА ОТВЕТА]\n"
+                "Инструкция: Проанализируй данные клиента и сформируй проект ответа.\n\n"
+                "[ВХОДНОЙ ДОКУМЕНТ: КАРТОЧКА КЛИЕНТА ИЗ CRM]\n"
+                "ФИО: Соколов Алексей Дмитриевич\n"
+                "Email: alex.sokolov@corporate.org\n"
+                "Телефон: +7 916 123-45-67\n"
+                "Паспорт: 45 10 987654\n\n"
+                "Статус: Заявка одобрена. Алексею Дмитриевичу нужно предоставить "
+                "оригиналы документов до 15.11.2026.\n"
+                "Поручитель: Морозова Елена Васильевна (+7 903 555-44-33)."
+            ),
+        })
+        if DEMO_CLIENTS_DIR.exists():
+            for f in sorted(DEMO_CLIENTS_DIR.glob("*.txt")):
+                cases.append({
+                    "id": f.stem,
+                    "title": f"📁 Карточка {f.stem.upper()}",
+                    "filename": f.name,
+                    "content": f.read_text(encoding="utf-8"),
+                })
+        return cases
+
+    @app.post("/api/cases/generate")
+    def api_generate_case() -> dict[str, str]:
+        return _generate_synthetic_case()
+
+    @app.post("/api/process")
+    def process(body: TextRequest):
+        started = time.perf_counter()
+        ctx = Context(f"{project}-{body.mode}", body.mode)
+        try:
+            spans = detect(body.text, ctx)
+            masked = mask(body.text, spans, ctx)
+            restored = restore(masked.text, ctx)
+        except Exception:
+            return JSONResponse({"detail": "Обработка отклонена локальным движком."}, 500)
+        return {
+            "masked_text": masked.text,
+            "restored_text": restored.text,
+            "status": restored.status,
+            "exact": restored.text == body.text,
+            "spans": [asdict(span) for span in spans],
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+            "scope": "local_transform_only",
+        }
+
+    @app.post("/api/restore")
+    def restore_answer(body: TextRequest):
+        try:
+            result = restore(body.text, Context(f"{project}-{body.mode}", body.mode))
+        except Exception:
+            return JSONResponse({"detail": "Восстановление отклонено локальным движком."}, 500)
+        return {
+            "restored_text": result.text,
+            "status": result.status,
+            "unresolved": [asdict(item) for item in result.unresolved],
+        }
+
+    @app.post("/api/presentation/run")
+    def api_presentation_run(req: PresentationRunRequest) -> dict[str, Any]:
+        started = time.perf_counter()
+        ctx = Context(f"{project}-{req.mode}", req.mode)
+
+        # Isolated session project vault: clean previous run
+        try:
+            with Vault(f"{project}-{req.mode}") as v:
+                v.purge()
+        except Exception:
+            pass
+
+        try:
+            spans = detect(req.text, ctx)
+            masked = mask(req.text, spans, ctx)
+        except Exception:
+            return JSONResponse({"detail": "Обработка отклонена локальным движком."}, 500)
+
+        vault_pairs: dict[str, str] = {}
+        try:
+            with Vault(f"{project}-{req.mode}") as v:
+                vault_pairs = v.get_pairs()
+        except Exception:
+            pass
+
+        # Step 1: Input text metadata
+        step1 = {
+            "text": req.text,
+            "char_count": len(req.text),
+            "line_count": len(req.text.splitlines()),
+            "word_count": len(req.text.split()),
+        }
+
+        # Step 2: Detection
+        step2_html = _render_highlighted_spans(req.text, spans)
+        ui_spans = [
             {
-                "replacement": str(r["replacement"]),
-                "original": str(r["original"]),
-                "entity_id": str(r["entity_id"]),
+                "start": s.start,
+                "end": s.end,
+                "type": str(s.type).split(".")[-1],
+                "raw_text": s.raw_text,
+                "detector": s.detector,
+                "confidence": s.confidence or 1.0,
             }
-            for r in rows
+            for s in spans
         ]
+        step2 = {
+            "text": req.text,
+            "spans": ui_spans,
+            "spans_count": len(spans),
+            "types_detected": sorted(list({s["type"] for s in ui_spans})),
+            "highlighted_html": step2_html,
+            "detect_latency_ms": round((time.perf_counter() - started) * 1000, 2),
+        }
 
-    return {
-        "exists": True,
-        "project_id": project_id,
-        "stats": stats,
-        "entities": entities,
-        "pairs": pairs,
-    }
+        # Step 3: Masking & Vault
+        entities_table = _build_entities_table(spans, masked, vault_pairs, req.mode)
+        step3_html = _render_masked_html(masked.text, vault_pairs, req.mode)
+        replaced_count = sum(1 for s in spans if s.raw_text not in masked.text)
+
+        step3 = {
+            "masked_text": masked.text,
+            "masked_highlighted_html": step3_html,
+            "entities_table": entities_table,
+            "vault_pairs_count": len(vault_pairs),
+            "spans_replaced": f"{replaced_count} из {len(spans)} обнаруженных",
+            "mask_latency_ms": round((time.perf_counter() - started) * 1000, 2),
+        }
+
+        # Step 4: Model Reply sample
+        model_response_text = _generate_model_reply(masked.text, req.mode, vault_pairs)
+        step4_html, pseudonyms_used = _render_agent_output_html(
+            model_response_text, vault_pairs, req.mode
+        )
+        step4 = {
+            "agent_output_text": model_response_text,
+            "agent_output_highlighted_html": step4_html,
+            "pseudonyms_used": pseudonyms_used,
+            "model_name": "Локальный пример ответа автономного агента (LLM не вызывалась)",
+        }
+
+        # Step 5: Restore
+        t_rest_start = time.perf_counter()
+        try:
+            restored_reply = restore(model_response_text, ctx)
+        except Exception:
+            return JSONResponse({"detail": "Восстановление отклонено локальным движком."}, 500)
+        t_restore = (time.perf_counter() - t_rest_start) * 1000
+
+        transformations = _extract_transformations(
+            model_response_text, restored_reply.text, vault_pairs
+        )
+        step5_html = _render_restored_html(restored_reply.text, transformations)
+
+        step5 = {
+            "restored_text": restored_reply.text,
+            "restored_highlighted_html": step5_html,
+            "status": str(restored_reply.status),
+            "unresolved_count": len(restored_reply.unresolved),
+            "is_complete": restored_reply.status == "complete",
+            "restore_latency_ms": round(t_restore, 2),
+            "transformations": transformations,
+        }
+
+        total_latency = (time.perf_counter() - started) * 1000
+        return {
+            "step1": step1,
+            "step2": step2,
+            "step3": step3,
+            "step4": step4,
+            "step5": step5,
+            "mode": req.mode,
+            "total_latency_ms": round(total_latency, 2),
+        }
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    return app
 
 
-@app.post("/api/vault/purge")
-def api_purge_vault(project_id: str = "showcase-demo") -> dict[str, Any]:
-    db_path = get_vault_path(project_id)
-    if not db_path.exists():
-        return {"success": True, "message": f"Vault '{project_id}' already clean."}
-
-    with Vault(project_id) as v:
-        v.purge()
-    return {"success": True, "message": f"Vault '{project_id}' successfully purged."}
-
-
-@app.get("/api/benchmarks")
-def api_get_benchmarks() -> dict[str, Any]:
-    report_file = BENCH_DIR / "REPORT-restoration.md"
-    content = ""
-    if report_file.exists():
-        content = report_file.read_text(encoding="utf-8")
-
-    return {
-        "roundtrip_accuracy_pct": 100.0,
-        "successful_cases": "180/180",
-        "mask_latency_ms_per_1k": 58.25,
-        "restore_latency_ms_per_1k": 30.87,
-        "vault_bytes_per_entity": 7562,
-        "leaks_detected": 0,
-        "canary_verdict": "CLEAN",
-        "isolation_permissions": "0600 SQLite / 0700 dir",
-        "security_policy": "Fail-Closed on any anomaly",
-        "report_markdown": content,
-    }
+app = create_app()
