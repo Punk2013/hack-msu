@@ -73,6 +73,40 @@ def test_protected_file_cannot_be_inside_export(config):
 
 
 @pytest.mark.usefixtures("linux_profile")
+@pytest.mark.parametrize("path_kind", ["absolute", "relative", "symlink"])
+@pytest.mark.parametrize("export_kind", ["workspace", "runtime"])
+def test_configured_vault_cannot_be_exported(config, monkeypatch, path_kind, export_kind):
+    exported = config.workspace
+    runtimes = ()
+    if export_kind == "runtime":
+        exported = config.workspace.parent / "runtime"
+        exported.mkdir()
+        runtimes = (exported,)
+    vault = exported / "private-vault"
+    # Even a not-yet-created vault must be protected before its first write.
+    configured = str(vault)
+    if path_kind == "relative":
+        monkeypatch.chdir(exported.parent)
+        configured = str(vault.relative_to(exported.parent))
+    elif path_kind == "symlink":
+        link = config.workspace.parent / "vault-link"
+        link.symlink_to(vault, target_is_directory=True)
+        configured = str(link)
+    monkeypatch.setenv("PII_VAULT_DIR", configured)
+    with pytest.raises(SandboxError, match="protected"):
+        SandboxConfig(config.workspace, config.write_root, runtime_roots=runtimes).validate()
+    assert not vault.exists()
+
+
+@pytest.mark.usefixtures("linux_profile")
+def test_configured_vault_outside_export_is_allowed(config, monkeypatch):
+    vault = config.workspace.parent / "private-vault"
+    monkeypatch.setenv("PII_VAULT_DIR", str(vault))
+    config.validate()
+    assert not vault.exists()
+
+
+@pytest.mark.usefixtures("linux_profile")
 def test_host_unix_socket_inside_workspace_is_refused(config):
     with socket.socket(socket.AF_UNIX) as peer:
         peer.bind(str(config.workspace / "host-service.sock"))
