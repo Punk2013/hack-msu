@@ -75,7 +75,9 @@ def test_no_bubblewrap_means_no_unprotected_fallback(config, tmp_path, monkeypat
         build_command(config, tmp_path, ["/usr/bin/true"])
 
 
-def test_command_drops_host_environment_and_all_network_namespaces(config, tmp_path):
+def test_command_drops_host_environment_and_all_network_namespaces(config, tmp_path, monkeypatch):
+    # Command construction is portable; real execution is tested separately.
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/bwrap")
     args = build_command(config, tmp_path, ["/usr/bin/true"])
     assert "--unshare-all" in args
     assert "--share-net" not in args
