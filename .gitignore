@@ -26,5 +26,5 @@ __pycache__/
 dumps/
 
 # Demo output (generated)
-demo/out/
+demo/out*/
 demo/.run/
