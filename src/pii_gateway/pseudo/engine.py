@@ -159,10 +159,16 @@ class _Name:
 def _analyze_name(raw: str) -> _Name | None:
     """Extract Name/Patr/Surn roles, gender, and case via pymorphy3, or None."""
     words = raw.split()
-    if not (1 <= len(words) <= 3):
-        return None
+    if not (1 <= len(words) <= 3) or raw != " ".join(words):
+        return None  # line breaks or odd spacing: not a single name, use a marker
     analyzer = _morph()
-    word_parses = [analyzer.parse(w) for w in words]
+    # only parses that are a name part; a common noun next to a name ("Петров\nКонтакты")
+    # must not become a name token
+    word_parses = [
+        [p for p in analyzer.parse(w) if set(ROLES) & set(p.tag.grammemes)] for w in words
+    ]
+    if not all(word_parses):
+        return None
 
     for gender in ("masc", "femn"):
         chosen = []
@@ -183,7 +189,12 @@ def _analyze_name(raw: str) -> _Name | None:
             case = next(c for c in CASES if c in cases)
             tokens = []
             for fit in chosen:
-                p = next(p for p in fit if p.tag.case == case)
+                # declinable reading first: "Анне" is datv of "Анна", not the rare fixed "Анне"
+                p = next(
+                    p
+                    for p in sorted(fit, key=lambda p: "Fixd" in p.tag.grammemes)
+                    if p.tag.case == case
+                )
                 role = next(r for r in ROLES if r in p.tag.grammemes)
                 tokens.append(_Token(role, p.normal_form, p))
             roles = [t.role for t in tokens]
@@ -215,6 +226,7 @@ def _person_pairs(
     """{fake_form: original_form} for all cases of this mention, or None if unsafe."""
     words = raw.split()
     pairs: dict[str, str] = {}
+    extra: dict[str, str] = {}
     for case in CASES:
         orig, fake = [], []
         for token, word in zip(name.tokens, words, strict=True):
@@ -230,11 +242,50 @@ def _person_pairs(
             o_text = raw  # keep the exact spelling the user wrote
         if pairs.get(f_text, o_text) != o_text:
             return None  # one fake form would restore to two originals
-        known = vault.get_pair(f_text)
-        if f_text == o_text or vault.is_known_original(f_text) or known not in (None, o_text):
+        known = vault.get_pair_entry(f_text)
+        if f_text == o_text or vault.is_known_original(f_text) or known not in (
+            None,
+            (o_text, entity_id),
+        ):
             return None
         pairs[f_text] = o_text
-    return pairs
+        roles = [t.role for t in name.tokens]
+        for f_var, o_var in _variants(roles, fake, orig):
+            if f_var in pairs or extra.get(f_var, o_var) != o_var:
+                extra[f_var] = ""  # ambiguous within this person: never restore it
+            elif vault.is_known_original(f_var):
+                return None
+            else:
+                owner = vault.get_pair_entry(f_var)
+                if owner is None or owner == (o_var, entity_id):
+                    extra[f_var] = o_var
+                elif owner[0] != o_var:
+                    # another person already owns this short form (same fake surname):
+                    # "Господин Новиков" would restore to the wrong client, pick another fake
+                    return None
+                # else: another person with the same original short form ("Иванов");
+                # the existing pair already restores it correctly, do not rebind it
+    return pairs | {f: o for f, o in extra.items() if o and f not in pairs}
+
+
+def _variants(roles: list[str], fake: list[str], orig: list[str]) -> list[tuple[str, str]]:
+    """Other ways the model may write the same name: word order, initials, surname alone."""
+    if "Surn" not in roles or len(roles) < 2:
+        return []
+    by_role_f = dict(zip(roles, fake, strict=True))
+    by_role_o = dict(zip(roles, orig, strict=True))
+    given = [r for r in ("Name", "Patr") if r in roles]
+    out = []
+    for order in (["Surn", *given], [*given, "Surn"]):
+        out.append((" ".join(by_role_f[r] for r in order), " ".join(by_role_o[r] for r in order)))
+    f_init = " ".join(by_role_f[r][0] + "." for r in given)
+    o_init = " ".join(by_role_o[r][0] + "." for r in given)
+    out.append((f"{by_role_f['Surn']} {f_init}", f"{by_role_o['Surn']} {o_init}"))
+    out.append((f"{f_init} {by_role_f['Surn']}", f"{o_init} {by_role_o['Surn']}"))
+    out.append((by_role_f["Surn"], by_role_o["Surn"]))
+    if len(given) == 2:  # "Уважаемая Анна Сергеевна" in a letter
+        out.append((" ".join(by_role_f[r] for r in given), " ".join(by_role_o[r] for r in given)))
+    return out
 
 
 def _normalize(kind: PiiType, raw: str) -> str:

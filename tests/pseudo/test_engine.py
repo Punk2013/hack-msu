@@ -108,3 +108,75 @@ def test_projects_are_isolated():
     spans = spans_for(text, ("Иван Петрович Иванов", PiiType.PERSON))
     masked = mask(text, spans, Context("p1")).text
     assert restore(masked, Context("p2")).text == masked
+
+
+def test_model_reorders_name_or_uses_initials_or_surname_only():
+    ctx = Context("variants")
+    a = "Клиент: Иван Петрович Иванов."
+    masked = mask(a, spans_for(a, ("Иван Петрович Иванов", PiiType.PERSON)), ctx).text
+    first, patr, last = masked.removeprefix("Клиент: ").removesuffix(".").split()
+    probes = {
+        f"{last} {first} {patr}": "Иванов Иван Петрович",
+        f"{last} {first[0]}. {patr[0]}.": "Иванов И. П.",
+        f"{first[0]}. {patr[0]}. {last}": "И. П. Иванов",
+        f"Господин {last}": "Господин Иванов",
+    }
+    for probe, expected in probes.items():
+        assert restore(probe, ctx).text == expected, probe
+
+
+@pytest.mark.parametrize("raw", ["Петров\nКонтакты", "Иван\nФамилия", "Иван  Петров"])
+def test_odd_person_span_falls_back_to_marker_instead_of_failing(raw):
+    # spans like these came from NER on a model-written form in the live 7b run
+    ctx = Context("odd")
+    text = f"Имя: {raw}"
+    result = mask(text, spans_for(text, (raw, PiiType.PERSON)), ctx)
+    assert raw not in result.text
+    assert restore(result.text, ctx).text == text
+
+
+def test_name_and_patronymic_without_surname_link_and_restore():
+    ctx = Context("given")
+    card = "ФИО: Анна Сергеевна Смирнова. Анне Сергеевне нужно напомнить об оплате."
+    spans = spans_for(card, ("Анна Сергеевна Смирнова", PiiType.PERSON),
+                      ("Анне Сергеевне", PiiType.PERSON))
+    result = mask(card, spans, ctx)
+    assert result.replacements[0].entity_id == result.replacements[1].entity_id
+    first, patr, _ = result.text.removeprefix("ФИО: ").split(".")[0].split()
+    assert result.text.split(". ")[1].startswith(first[:-1])  # same fake given name, declined
+    assert restore(f"Уважаемая {first} {patr}!", ctx).text == "Уважаемая Анна Сергеевна!"
+
+
+def test_two_people_never_share_a_restorable_short_form(monkeypatch):
+    # reproduction from review of #36: fixed UUIDs made both fakes "… Новиков"
+    import uuid as uuid_mod
+
+    ids = iter([uuid_mod.UUID(int=1 << 80), uuid_mod.UUID(int=13 << 80)])
+    monkeypatch.setattr("pii_gateway.pseudo.engine.uuid.uuid4", lambda: next(ids))
+    ctx = Context("shared-surname")
+    a, b = "ФИО: Иван Петрович Иванов.", "ФИО: Пётр Сергеевич Петров."
+    fa = mask(a, spans_for(a, ("Иван Петрович Иванов", PiiType.PERSON)), ctx).text
+    fb = mask(b, spans_for(b, ("Пётр Сергеевич Петров", PiiType.PERSON)), ctx).text
+    sa = fa.removeprefix("ФИО: ").removesuffix(".").split()[-1]
+    sb = fb.removeprefix("ФИО: ").removesuffix(".").split()[-1]
+    assert sa != sb
+    assert restore(f"Господин {sb}", ctx).text == "Господин Петров"
+    assert restore(f"Господин {sa}", ctx).text == "Господин Иванов"
+
+
+def test_same_original_surname_for_two_people_does_not_abort(monkeypatch):
+    # reproduction from IldwayS's review of #36: both fakes get the same surname
+    from types import SimpleNamespace
+
+    ids = iter([2, 8])
+    monkeypatch.setattr(
+        "pii_gateway.pseudo.engine.uuid.uuid4",
+        lambda: SimpleNamespace(hex=f"{next(ids):032x}"[::-1]),
+    )
+    ctx = Context("shared-original-surname")
+    for raw in ("Иван Петрович Иванов", "Пётр Александрович Иванов"):
+        text = f"ФИО: {raw}."
+        masked = mask(text, spans_for(text, (raw, PiiType.PERSON)), ctx).text
+        assert restore(masked, ctx).text == text
+        surname = masked.removeprefix("ФИО: ").removesuffix(".").split()[-1]
+        assert restore(f"Господин {surname}", ctx).text == "Господин Иванов"
