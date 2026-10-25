@@ -30,7 +30,7 @@ class Settings:
     upstream_api_key: str | None = None
     local_token: str | None = None
     project_id: str = "default"
-    mode: str = "marker"
+    mode: str = "realistic"
     passthrough: bool = False
     workspace: Path = field(default_factory=Path.cwd)
     write_roots: list[Path] = field(default_factory=list)
@@ -46,7 +46,7 @@ class Settings:
             upstream_api_key=env("PII_UPSTREAM_API_KEY"),
             local_token=env("PII_LOCAL_TOKEN"),
             project_id=env("PII_PROJECT_ID", "default"),
-            mode=env("PII_MODE", "marker"),
+            mode=env("PII_MODE", "realistic"),
             passthrough=env("PII_PASSTHROUGH") == "1",
             workspace=workspace,
             write_roots=[Path(p) for p in roots.split(":")] if roots else [workspace],

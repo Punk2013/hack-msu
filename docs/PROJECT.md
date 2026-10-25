@@ -11,7 +11,7 @@
 
 - **Пользователь и демо:** агент готовит уведомления клиентам по `.txt`/`.md` с синтетическими
   данными. Провайдер видит только замены, итоговые файлы содержат реальные значения.
-- **MVP:** OpenAI Chat Completions; типы PERSON, EMAIL, PHONE, PASSPORT_RU; режим `marker`;
+- **MVP:** OpenAI Chat Completions; типы PERSON, EMAIL, PHONE, PASSPORT_RU; по умолчанию выдуманные данные (`realistic`), метки — запасной вариант;
   fail-closed; политика инструментов; sandbox сети агента.
 - **Не входит:** Anthropic/Responses API, автоматика публичных лиц, OCR, вложения, остальные типы ПДн
   (только после сквозного прохода).
@@ -37,7 +37,7 @@
 | 18:00–19:30 | Защита | — |
 
 Если checkpoint не пройден — пишем в Issue #4, что мешает, и режем объём, а не сроки.
-Порядок отсечения: realistic → NER (только regex + словарь имён) → стриминг → sandbox ОС
+Порядок отсечения: склонение ФИО (остаются выдуманные ФИО в именительном падеже) → NER (только regex + словарь имён) → стриминг → sandbox ОС
 (остаётся политика tools в gateway).
 
 ## Команда и задачи
@@ -80,7 +80,7 @@ PII_WORKSPACE=./demo PII_WRITE_ROOTS=./demo/out \
 ```
 
 Переменные: `PII_UPSTREAM_API_KEY` (ключ провайдера, хранится только у gateway),
-`PII_LOCAL_TOKEN` (токен, который агент передаёт gateway), `PII_PROJECT_ID`, `PII_MODE=marker|realistic`,
+`PII_LOCAL_TOKEN` (токен, который агент передаёт gateway), `PII_PROJECT_ID`, `PII_MODE=realistic|marker` (по умолчанию `realistic`),
 `PII_PASSTHROUGH=1` (Gate 0: без изменений), `PII_DUMP_DIR` (полные дампы, **только синтетика**).
 Клиент: указать `base_url` = `http://127.0.0.1:8787/v1`.
 CI запускает пробельную проверку, ruff и pytest.
