@@ -6,7 +6,7 @@
   fakes for structured values; marker ([PERSON_1]) only as a fallback.
 - restore() replaces only replacements recorded in the vault and never guesses.
 - Corrupted/malformed markers ([PERSON_1, [PERSON_x], [PERSON_1 ]) return PARTIAL.
-- Literal user markers in input text are reserved so newly issued markers never collide.
+- Reserved marker syntax in raw input is refused rather than guessed or reinterpreted.
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ KNOWN_PII_TYPES = (
 TYPES_PATTERN = "|".join(KNOWN_PII_TYPES)
 
 MARKER_PATTERN = re.compile(rf"\[({TYPES_PATTERN})_([0-9]+)\]")
+RESERVED_MARKER_PREFIX = re.compile(rf"\[(?:{TYPES_PATTERN})(?=[_\]\s]|$)")
 
 # Matches malformed or corrupted markers:
 # 1. Non-numeric or whitespace inside tag: [PERSON_x], [PERSON_1 ]
@@ -292,17 +293,9 @@ def _resolve_entity(
     found, entity_id = vault.get_key(keys[0])
     if found and entity_id is not None:
         return entity_id, "partial_single" if is_partial else "exact"
-    if not found:
-        owners = set()
-        for key in keys[1:]:
-            k_found, owner = vault.get_key(key)
-            if k_found:
-                owners.add(owner)
-        if len(owners) == 1 and None not in owners:
-            entity_id = owners.pop()
-            for key in keys:
-                vault.add_key(key, entity_id)
-            return entity_id, "partial_single"
+    # Do not promote a match on a subset of roles to a match on a full name.
+    # A full mention registers partial keys for subsequent shorter mentions;
+    # an earlier short mention alone is insufficient evidence to merge people.
     if found:  # partial name shared by several people: its own stable entity
         keys = [f"ambiguous|{keys[0]}"]
         a_found, entity_id = vault.get_key(keys[0])
@@ -316,7 +309,7 @@ def _resolve_entity(
 
 
 def _marker(vault: Vault, kind: PiiType, entity_id: str, raw: str) -> str:
-    marker = vault.get_marker_for_entity(entity_id)
+    marker = vault.get_marker_for_surface(entity_id, raw)
     if marker is None:
         marker = f"[{kind}_{vault.get_next_marker_index(kind)}]"
         vault.add_marker(marker, entity_id, kind)
@@ -364,15 +357,12 @@ def _replace_one(vault: Vault, span: EntitySpan, ctx: Context) -> tuple[str, Rep
 
 def mask(text: str, spans: list[EntitySpan], ctx: Context) -> MaskResult:
     check_spans(text, spans)
+    if RESERVED_MARKER_PREFIX.search(text):
+        raise MaskError("input contains reserved marker syntax")
     if not spans:
         return MaskResult(text=text, replacements=[])
     try:
         with Vault(ctx.project_id) as vault:
-            # 1. Prevent collision with literal markers already existing in the input text:
-            for m in MARKER_PATTERN.finditer(text):
-                m_type, m_id = m.group(1), m.group(2)
-                vault.reserve_marker_index_at_least(m_type, int(m_id))
-
             planned = [_replace_one(vault, span, ctx) for span in spans]
     except MaskError:
         raise

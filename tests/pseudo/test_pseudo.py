@@ -8,6 +8,7 @@ import pytest
 from pii_gateway.core.types import (
     Context,
     EntitySpan,
+    MaskError,
     PiiType,
     RestoreStatus,
 )
@@ -146,14 +147,16 @@ def test_repeated_mention_across_different_calls_and_inflections():
     t2 = "Ивану Петровичу Иванову отправить копию."
     s2 = [EntitySpan(0, 23, PiiType.PERSON, "Ивану Петровичу Иванову", detector="test")]
     m2 = mask(t2, s2, ctx)
-    # Must link to the same entity and receive [PERSON_1]!
-    assert m2.text == "[PERSON_1] отправить копию."
+    # Identity stays the same; a distinct surface needs its own reversible marker.
+    assert m1.replacements[0].entity_id == m2.replacements[0].entity_id
+    assert m2.text == "[PERSON_2] отправить копию."
+    assert restore(m2.text, ctx).text == t2
 
     # Call 3: Replay both
     m1_replay = mask(t1, s1, ctx)
     m2_replay = mask(t2, s2, ctx)
     assert m1_replay.text == "Менеджер [PERSON_1]."
-    assert m2_replay.text == "[PERSON_1] отправить копию."
+    assert m2_replay.text == "[PERSON_2] отправить копию."
 
 
 def test_repeated_identical_email_gets_same_marker():
@@ -175,15 +178,9 @@ def test_literal_marker_in_original_text_does_not_collide():
         EntitySpan(20, 31, PiiType.PERSON, "Иван Иванов", detector="test"),
     ]
 
-    masked = mask(text, spans, ctx)
-    # Since [PERSON_1] was in the original text, the new entity must receive [PERSON_2]
-    assert masked.text == "Literal [PERSON_1]; [PERSON_2]"
-
-    restored = restore(masked.text, ctx)
-    # [PERSON_2] unmasks to Иван Иванов, while literal [PERSON_1] was not created by the gateway
-    # so it is returned unresolved/partial without corrupting user literal text!
-    assert "Иван Иванов" in restored.text
-    assert restored.status == RestoreStatus.PARTIAL
+    # Raw marker syntax is refused consistently, even before any marker is issued.
+    with pytest.raises(MaskError, match="reserved marker"):
+        mask(text, spans, ctx)
 
 
 def test_partial_single_mention_linking():
@@ -198,7 +195,8 @@ def test_partial_single_mention_linking():
     # Single surname in document links to the sole full candidate
     assert masked.replacements[1].linked_by == "partial_single"
     assert masked.replacements[1].entity_id == masked.replacements[0].entity_id
-    assert masked.text == "Подписал [PERSON_1]. Передать [PERSON_1]."
+    assert masked.text == "Подписал [PERSON_1]. Передать [PERSON_2]."
+    assert restore(masked.text, ctx).text == text
 
 
 def test_realistic_mode_morphology_and_cases():

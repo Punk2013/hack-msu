@@ -83,13 +83,14 @@ def test_model_written_case_is_restored_with_matching_original_case():
     assert restored.status == RestoreStatus.COMPLETE
 
 
-def test_partial_name_seen_first_then_full_name_reuses_entity():
+def test_partial_name_seen_first_does_not_identify_a_later_full_name():
     ctx = Context("partial")
     a = "Ивану Петровичу напомнить."
     b = "ФИО: Иван Петрович Иванов."
     ma = mask(a, spans_for(a, ("Ивану Петровичу", PiiType.PERSON)), ctx)
     mb = mask(b, spans_for(b, ("Иван Петрович Иванов", PiiType.PERSON)), ctx)
-    assert ma.replacements[0].entity_id == mb.replacements[0].entity_id
+    assert ma.replacements[0].entity_id != mb.replacements[0].entity_id
+    assert restore(ma.text, ctx).text == a
     assert restore(mb.text, ctx).text == b
 
 
