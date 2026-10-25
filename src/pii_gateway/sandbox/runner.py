@@ -63,6 +63,10 @@ class SandboxConfig:
         if output == workspace or not output.is_relative_to(workspace):
             raise SandboxError("write root must be a dedicated directory inside workspace")
         protected = [PACKAGE_ROOT, DEFAULT_VAULT, *self.protected_paths]
+        # Match vault.storage's path semantics without creating/opening the vault.
+        configured_vault = os.environ.get("PII_VAULT_DIR")
+        if configured_vault:
+            protected.append(Path(configured_vault).expanduser())
         roots = [workspace, *self.runtime_roots]
         roots += [
             Path(root)

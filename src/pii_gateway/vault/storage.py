@@ -437,6 +437,16 @@ class Vault:
         ).fetchone()
         return str(row["marker_text"]) if row else None
 
+    def get_marker_for_surface(self, entity_id: str, original: str) -> str | None:
+        """Reuse a marker only when both entity and exact original surface match."""
+        row = self._get_connection().execute(
+            "SELECT m.marker_text FROM markers m JOIN pairs p "
+            "ON p.replacement = m.marker_text AND p.entity_id = m.entity_id "
+            "WHERE m.entity_id = ? AND p.original = ? ORDER BY m.marker_text LIMIT 1",
+            (entity_id, original),
+        ).fetchone()
+        return str(row["marker_text"]) if row else None
+
     def get_all_marker_mappings(self) -> dict[str, str]:
         """Return a dictionary of {marker_text: canonical_original_text} for this project."""
         conn = self._get_connection()
@@ -481,13 +491,18 @@ class Vault:
         return None if row is None else str(row["original"])
 
     def add_pair(self, replacement: str, original: str, entity_id: str) -> None:
-        """First original wins: a replacement never changes meaning once issued."""
+        """Never silently accept a replacement already bound to another value."""
         conn = self._get_connection()
         with conn:
             conn.execute(
                 "INSERT OR IGNORE INTO pairs(replacement, original, entity_id) VALUES (?, ?, ?)",
                 (replacement, original, entity_id),
             )
+            row = conn.execute(
+                "SELECT original, entity_id FROM pairs WHERE replacement = ?", (replacement,)
+            ).fetchone()
+            if row["original"] != original or row["entity_id"] != entity_id:
+                raise VaultError("replacement collision")
 
     def get_pairs(self) -> dict[str, str]:
         rows = self._get_connection().execute("SELECT replacement, original FROM pairs").fetchall()
