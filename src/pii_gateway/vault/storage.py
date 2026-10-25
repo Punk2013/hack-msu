@@ -143,6 +143,20 @@ class Vault:
                     next_val INTEGER NOT NULL
                 );
 
+                -- engine lookup tables: normalized key -> entity, replacement -> original
+                CREATE TABLE IF NOT EXISTS entity_keys (
+                    key TEXT PRIMARY KEY,
+                    entity_id TEXT,  -- NULL: key shared by several entities (ambiguous)
+                    FOREIGN KEY (entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS pairs (
+                    replacement TEXT PRIMARY KEY,
+                    original TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    FOREIGN KEY (entity_id) REFERENCES entities(entity_id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS audit (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ts REAL NOT NULL,
@@ -342,6 +356,50 @@ class Vault:
         """
         rows = conn.execute(query).fetchall()
         return {str(r["marker_text"]): str(r["orig_text"]) for r in rows}
+
+    def get_key(self, key: str) -> tuple[bool, str | None]:
+        """(found, entity_id); entity_id is None for an ambiguous key."""
+        row = self._get_connection().execute(
+            "SELECT entity_id FROM entity_keys WHERE key = ?", (key,)
+        ).fetchone()
+        return (False, None) if row is None else (True, row["entity_id"])
+
+    def add_key(self, key: str, entity_id: str) -> None:
+        """Register key; a key already owned by another entity becomes ambiguous."""
+        conn = self._get_connection()
+        with conn:
+            row = conn.execute("SELECT entity_id FROM entity_keys WHERE key = ?", (key,)).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO entity_keys(key, entity_id) VALUES (?, ?)", (key, entity_id)
+                )
+            elif row["entity_id"] not in (None, entity_id):
+                conn.execute("UPDATE entity_keys SET entity_id = NULL WHERE key = ?", (key,))
+
+    def get_pair(self, replacement: str) -> str | None:
+        row = self._get_connection().execute(
+            "SELECT original FROM pairs WHERE replacement = ?", (replacement,)
+        ).fetchone()
+        return None if row is None else str(row["original"])
+
+    def add_pair(self, replacement: str, original: str, entity_id: str) -> None:
+        """First original wins: a replacement never changes meaning once issued."""
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO pairs(replacement, original, entity_id) VALUES (?, ?, ?)",
+                (replacement, original, entity_id),
+            )
+
+    def get_pairs(self) -> dict[str, str]:
+        rows = self._get_connection().execute("SELECT replacement, original FROM pairs").fetchall()
+        return {str(r["replacement"]): str(r["original"]) for r in rows}
+
+    def is_known_original(self, text: str) -> bool:
+        row = self._get_connection().execute(
+            "SELECT 1 FROM pairs WHERE original = ? LIMIT 1", (text,)
+        ).fetchone()
+        return row is not None
 
     def get_all_pseudo_mappings(self) -> list[tuple[str, str, str | None]]:
         """Return list of (pseudo_text, original_text, form) sorted by descending pseudo length."""

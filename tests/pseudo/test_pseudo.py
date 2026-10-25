@@ -89,8 +89,10 @@ def test_namesakes_in_same_document():
     ]
 
     masked = mask(text, spans, ctx)
-    assert "[PERSON_1]" in masked.text
-    assert "[PERSON_2]" in masked.text
+    # Decision (ARCHITECTURE.md §4): the same full name in a project is one entity.
+    # Namesakes merge; this is a documented MVP limitation.
+    assert masked.text.count("[PERSON_1]") == 2
+    assert "[PERSON_2]" not in masked.text
 
     restored = restore(masked.text, ctx)
     assert restored.text == text
