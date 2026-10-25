@@ -1,0 +1,13 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local editor/OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Add runtime-specific patterns after choosing the stack.
