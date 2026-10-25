@@ -84,7 +84,7 @@ class Workspace:
             if name == "list_files":
                 base = self._path(args.get("path", "."))
                 files = sorted(
-                    str(p.relative_to(self.root)) for p in base.rglob("*") if p.is_file()
+                    p.relative_to(self.root).as_posix() for p in base.rglob("*") if p.is_file()
                 )
                 return "\n".join(files) or "(пусто)"
             if name == "read_file":
