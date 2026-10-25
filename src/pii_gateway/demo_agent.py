@@ -177,7 +177,7 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
         {"role": "user", "content": task},
     ]
     wrote, nudges = False, 0
-    for _ in range(max_steps):
+    for step in range(max_steps):
         payload = {"model": model, "messages": messages, "tools": TOOLS}
         if stream:
             message = _stream_message(client, payload)
@@ -195,7 +195,7 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
         messages.append(message)
         if not message.get("tool_calls"):
             # small local models sometimes stop after reading; nudge them twice at most
-            if not wrote and nudges < 2:
+            if not wrote and nudges < 2 and step < max_steps - 1:
                 nudges += 1
                 messages.append({"role": "user", "content": NUDGE})
                 continue
