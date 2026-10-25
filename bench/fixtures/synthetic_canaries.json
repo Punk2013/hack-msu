@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "canaries": [
+    {"id": "person_ivan", "value": "Иван Иванов", "variants": ["Ивану Иванову", "Ивана Иванова"]},
+    {"id": "email_ivan", "value": "ivan@example.test"},
+    {"id": "phone_ivan", "value": "+7 000 000-00-01", "variants": ["+70000000001"]},
+    {"id": "passport_ivan", "value": "00 00 000001", "variants": ["0000000001"]}
+  ]
+}
