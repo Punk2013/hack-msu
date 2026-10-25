@@ -70,6 +70,8 @@ class Workspace:
         self.root = root.resolve()
 
     def _path(self, rel: str) -> Path:
+        if not isinstance(rel, str) or not rel:
+            raise ValueError("path must be a non-empty string")
         path = (self.root / rel).resolve()
         if path != self.root and self.root not in path.parents:
             raise ValueError(f"path outside workspace: {rel}")
@@ -77,15 +79,19 @@ class Workspace:
 
     def run(self, name: str, args: dict[str, Any]) -> str:
         try:
+            if not isinstance(args, dict):
+                raise ValueError("tool arguments must be a JSON object")
             if name == "list_files":
-                base = self._path(args.get("path") or ".")
+                base = self._path(args.get("path", "."))
                 files = sorted(
-                    str(p.relative_to(self.root)) for p in base.rglob("*") if p.is_file()
+                    p.relative_to(self.root).as_posix() for p in base.rglob("*") if p.is_file()
                 )
                 return "\n".join(files) or "(пусто)"
             if name == "read_file":
                 return self._path(args["path"]).read_text(encoding="utf-8")
             if name == "write_file":
+                if not isinstance(args.get("content"), str):
+                    raise ValueError("content must be a string")
                 path = self._path(args["path"])
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(args["content"], encoding="utf-8")
@@ -95,17 +101,53 @@ class Workspace:
             return f"ошибка: {exc}"
 
 
+def _completed_message(message: Any, finish: Any) -> dict[str, Any]:
+    """Only an explicitly completed choice can authorize local tool execution."""
+    if not isinstance(message, dict) or finish not in ("stop", "tool_calls"):
+        raise RuntimeError("model response did not complete successfully")
+    calls = message.get("tool_calls")
+    if calls:
+        if finish != "tool_calls" or not isinstance(calls, list):
+            raise RuntimeError("tool calls lack a valid completion")
+        for call in calls:
+            if not isinstance(call, dict):
+                raise RuntimeError("invalid tool call")
+            fn = call.get("function")
+            if (
+                call.get("type") != "function"
+                or not isinstance(call.get("id"), str)
+                or not call["id"]
+                or not isinstance(fn, dict)
+                or not isinstance(fn.get("name"), str)
+                or not isinstance(fn.get("arguments"), str)
+            ):
+                raise RuntimeError("invalid tool call")
+    elif finish == "tool_calls":
+        raise RuntimeError("tool completion contains no calls")
+    return message
+
+
 def _stream_message(client: httpx.Client, payload: dict[str, Any]) -> dict[str, Any]:
     """Collect a streamed response into one assistant message."""
     content, calls = "", {}
+    finish = None
     with client.stream("POST", "chat/completions", json={**payload, "stream": True}) as resp:
         if resp.status_code != 200:
             resp.read()
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
         for line in resp.iter_lines():
-            if not line.startswith("data: ") or line == "data: [DONE]":
+            if not line.startswith("data:"):
                 continue
-            for choice in json.loads(line[6:]).get("choices", []):
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            choices = json.loads(data).get("choices", [])
+            if len(choices) > 1:
+                raise RuntimeError("multiple stream choices are unsupported")
+            for choice in choices:
+                if finish is not None or choice.get("index", 0) != 0:
+                    raise RuntimeError("unexpected stream choice after completion")
+                finish = choice.get("finish_reason")
                 delta = choice.get("delta") or {}
                 if delta.get("content"):
                     content += delta["content"]
@@ -120,7 +162,7 @@ def _stream_message(client: httpx.Client, payload: dict[str, Any]) -> dict[str, 
     message: dict[str, Any] = {"role": "assistant", "content": content or None}
     if calls:
         message["tool_calls"] = [calls[i] for i in sorted(calls)]
-    return message
+    return _completed_message(message, finish)
 
 
 def run(task: str, base_url: str, model: str, workspace: Path, *,
@@ -140,7 +182,11 @@ def run(task: str, base_url: str, model: str, workspace: Path, *,
             resp = client.post("chat/completions", json=payload)
             if resp.status_code != 200:
                 raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
-            message = resp.json()["choices"][0]["message"]
+            choices = resp.json().get("choices", [])
+            if len(choices) != 1:
+                raise RuntimeError("expected a single response choice")
+            choice = choices[0]
+            message = _completed_message(choice.get("message"), choice.get("finish_reason"))
             if message.get("content"):
                 print(message["content"])
         messages.append(message)

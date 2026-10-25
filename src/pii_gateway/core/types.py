@@ -47,7 +47,7 @@ class VaultError(PiiGatewayError):
 @dataclass(frozen=True)
 class Context:
     project_id: str
-    mode: Mode = "marker"
+    mode: Mode = "realistic"
 
 
 @dataclass(frozen=True)
