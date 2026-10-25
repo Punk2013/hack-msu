@@ -34,13 +34,6 @@ DEFAULT_RULES: dict[str, ToolRule] = {
     "read_file": ToolRule(ToolClass.LOCAL_READ, ("path",)),
     "list_files": ToolRule(ToolClass.LOCAL_READ, ("path",)),
     "write_file": ToolRule(ToolClass.LOCAL_WRITE, ("path",)),
-    # pi coding agent (scripts/pi.sh runs it without bash)
-    "read": ToolRule(ToolClass.LOCAL_READ, ("path",)),
-    "ls": ToolRule(ToolClass.LOCAL_READ, ("path",)),
-    "grep": ToolRule(ToolClass.LOCAL_READ, ("path",)),
-    "find": ToolRule(ToolClass.LOCAL_READ, ("path",)),
-    "write": ToolRule(ToolClass.LOCAL_WRITE, ("path",)),
-    "edit": ToolRule(ToolClass.LOCAL_WRITE, ("path",)),
 }
 
 
