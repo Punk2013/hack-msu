@@ -155,6 +155,22 @@ def generate_report(results: dict, out_path: Path) -> None:
     r = results["realistic"]
     now_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
 
+    acc_m = m["accuracy_pct"]
+    acc_r = r["accuracy_pct"]
+    if acc_m == 100.0 and acc_r == 100.0:
+        fidelity_lines = [
+            "   - На проверенном синтетическом наборе в обоих режимах (`marker` и `realistic`)",
+            "     получено полное совпадение `restore(mask(x)) == x` для тестовых падежных форм.",
+            "     Замер проведён на фиксированном наборе и не гарантирует безошибочность модели.",
+        ]
+    else:
+        fidelity_lines = [
+            f"   - Измеренная точность восстановления составила: marker — {acc_m:.1f}%, "
+            f"realistic — {acc_r:.1f}%.",
+            f"     Ошибок roundtrip: marker — {m['total_cases'] - m['perfect_roundtrips']}, "
+            f"realistic — {r['total_cases'] - r['perfect_roundtrips']}.",
+        ]
+
     lines = [
         "# Отчёт по бенчмарку восстановления и Vault (Роль 3)",
         "",
@@ -181,8 +197,7 @@ def generate_report(results: dict, out_path: Path) -> None:
         "## 2. Анализ метрик восстановления",
         "",
         "1. **Точность падежных форм и форматов**:",
-        "   - В обоих режимах (`marker` и `realistic`) достигнута 100% точность восстановления",
-        "     (`restore(mask(x)) == x`) для всех 6 русских падежей.",
+        *fidelity_lines,
         "   - Структурированные типы (телефоны со скобками/пробелами, email-адреса, паспорта)",
         "     восстанавливаются с сохранением исходной пунктуации.",
         "",

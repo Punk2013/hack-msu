@@ -55,6 +55,14 @@ def cmd_list_projects(args: argparse.Namespace) -> int:
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
+    db_path = get_vault_path(args.project_id)
+    if not db_path.exists():
+        print(
+            f"Error: Vault database for project '{args.project_id}' does not exist.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         with Vault(args.project_id) as vault:
             stats = vault.get_stats()
@@ -85,6 +93,14 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
+    db_path = get_vault_path(args.project_id)
+    if not db_path.exists():
+        print(
+            f"Error: Vault database for project '{args.project_id}' does not exist.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         with Vault(args.project_id) as vault:
             entities = vault.list_entities()
@@ -118,8 +134,11 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 def cmd_purge(args: argparse.Namespace) -> int:
     db_path = get_vault_path(args.project_id)
     if not db_path.exists():
-        print(f"Vault database for project '{args.project_id}' does not exist.")
-        return 0
+        print(
+            f"Error: Vault database for project '{args.project_id}' does not exist.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not args.force:
         confirm = input(f"Are you sure you want to purge vault '{args.project_id}'? [y/N]: ")

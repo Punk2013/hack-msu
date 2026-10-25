@@ -84,3 +84,19 @@ def test_cli_purge_with_force(tmp_path: Path, monkeypatch, capsys):
 
     with Vault("target_project") as vault:
         assert vault.get_stats()["total_entities"] == 0
+
+
+def test_stats_does_not_create_a_nonexistent_vault(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.setenv("PII_VAULT_DIR", str(tmp_path))
+    code = main(["--json", "stats", "missing"])
+    capsys.readouterr()
+    assert not (tmp_path / "missing.db").exists()
+    assert code != 0
+
+
+def test_inspect_does_not_create_a_nonexistent_vault(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.setenv("PII_VAULT_DIR", str(tmp_path))
+    code = main(["inspect", "missing_inspect"])
+    capsys.readouterr()
+    assert not (tmp_path / "missing_inspect.db").exists()
+    assert code != 0
