@@ -87,7 +87,8 @@ def test_complete_call_positive_control(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(demo.httpx, "Client", lambda **kwargs: client)
     try:
-        demo.run("synthetic task", "http://synthetic/v1", "m", tmp_path, max_steps=1)
+        with pytest.raises(RuntimeError, match="step limit"):
+            demo.run("synthetic task", "http://synthetic/v1", "m", tmp_path, max_steps=1)
     finally:
         client.close()
     assert (tmp_path / "out/proof.txt").read_text() == "SYNTHETIC"

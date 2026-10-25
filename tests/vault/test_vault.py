@@ -68,3 +68,14 @@ def test_vault_file_permissions_posix(tmp_path: Path):
         pass
     stat = db_file.stat()
     assert (stat.st_mode & 0o777) == 0o600
+
+
+def test_pair_collision_is_rejected_without_changing_original(tmp_path):
+    with Vault("pairs", db_path=tmp_path / "pairs.db") as vault:
+        vault.add_entity("a", PiiType.PERSON)
+        vault.add_entity("b", PiiType.PERSON)
+        vault.add_pair("replacement", "first", "a")
+        vault.add_pair("replacement", "first", "a")
+        with pytest.raises(VaultError, match="collision"):
+            vault.add_pair("replacement", "second", "b")
+        assert vault.get_pair("replacement") == "first"
