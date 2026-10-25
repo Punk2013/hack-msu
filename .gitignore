@@ -11,3 +11,16 @@
 .vscode/
 
 # Add runtime-specific patterns after choosing the stack.
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Gateway runtime: vault and request dumps never go to git
+*.db
+*.db-wal
+*.db-shm
+dumps/
