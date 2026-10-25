@@ -183,7 +183,7 @@ def mask_request(body: dict[str, Any], t: Transformer) -> dict[str, Any]:
                 isinstance(value, float) and not math.isfinite(value)
             ):
                 raise UnsupportedRequest("invalid numeric parameter")
-            out[key] = value
+            out[key] = _mask_json(value, t)
     for key in ("stream", "parallel_tool_calls"):
         if key in body:
             if type(body[key]) is not bool:
