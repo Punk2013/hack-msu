@@ -32,7 +32,7 @@ REQUEST_FIELDS = {
     "frequency_penalty",
     "seed",
     "parallel_tool_calls",
-    "store",
+    "store",  # pi sends store=false: asks the provider not to keep the request
 }
 BLOCKED_NOTE = "\n[pii-gateway] вызов `{name}` заблокирован политикой: {reason}."
 

@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from pii_gateway.core.types import Context, PiiGatewayError
 from pii_gateway.gateway.adapter import UnsupportedRequest, mask_request, restore_response
+from pii_gateway.gateway.journal import Journal, summarize_message, summarize_sse
 from pii_gateway.gateway.policy import ToolPolicy
 from pii_gateway.gateway.stream import restore_sse
 from pii_gateway.gateway.transform import CorePipeline, PassThrough, Transformer
@@ -35,6 +36,7 @@ class Settings:
     workspace: Path = field(default_factory=Path.cwd)
     write_roots: list[Path] = field(default_factory=list)
     dump_dir: Path | None = None  # synthetic data only: full request/response dumps
+    journal: Path | None = None  # user's local report: original vs masked, both directions
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -51,6 +53,7 @@ class Settings:
             workspace=workspace,
             write_roots=[Path(p) for p in roots.split(":")] if roots else [workspace],
             dump_dir=Path(env("PII_DUMP_DIR")) if env("PII_DUMP_DIR") else None,
+            journal=Path(env("PII_JOURNAL")) if env("PII_JOURNAL") else None,
         )
 
 
@@ -78,6 +81,14 @@ def create_app(
         timeout=httpx.Timeout(300.0, connect=10.0),
     )
     app = FastAPI(title="pii-gateway")
+
+    journal = Journal(settings.journal) if settings.journal else None
+
+    def record(body: dict, outbound: dict, upstream: dict, restored: dict) -> None:
+        if journal is not None:
+            journal.write({"request_in": body.get("messages", []),
+                           "request_out": outbound.get("messages", []),
+                           "model_said": upstream, "agent_got": restored})
 
     def dump(kind: str, payload: Any) -> None:
         if settings.dump_dir is None:
@@ -129,9 +140,13 @@ def create_app(
             upstream_body = resp.json()
             dump("response", upstream_body)
             try:
-                return JSONResponse(restore_response(upstream_body, transformer, policy))
+                restored = restore_response(upstream_body, transformer, policy)
             except PiiGatewayError as exc:
                 return _error(502, f"pii-gateway restore failed: {exc}")
+            first = lambda b: ((b.get("choices") or [{}])[0]).get("message")  # noqa: E731
+            record(body, outbound, summarize_message(first(upstream_body)),
+                   summarize_message(first(restored)))
+            return JSONResponse(restored)
 
         req = client.build_request("POST", "chat/completions", json=outbound, headers=headers)
         resp = await client.send(req, stream=True)
@@ -140,12 +155,22 @@ def create_app(
             await resp.aclose()
             return JSONResponse(json.loads(content or b"{}"), status_code=resp.status_code)
 
+        upstream_lines: list[str] = []
+        emitted: list[str] = []
+
+        async def tee():
+            async for line in resp.aiter_lines():
+                upstream_lines.append(line)
+                yield line
+
         async def events():
             try:
-                async for event in restore_sse(resp.aiter_lines(), transformer, policy):
+                async for event in restore_sse(tee(), transformer, policy):
+                    emitted.append(event.decode() if isinstance(event, bytes) else event)
                     yield event
             finally:
                 await resp.aclose()
+                record(body, outbound, summarize_sse(upstream_lines), summarize_sse(emitted))
 
         return StreamingResponse(events(), media_type="text/event-stream")
 
