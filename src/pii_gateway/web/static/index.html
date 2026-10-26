@@ -1,61 +1,463 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="pii-session" content="__SESSION_TOKEN__">
-  <title>PII Gateway · Локальная песочница</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/app.js" defer></script>
+  <title>PII Gateway — Презентация и Демонстрация</title>
+  <link rel="stylesheet" href="static/styles.css">
 </head>
-<body>
-  <header><a href="/" class="brand">PII<span> / </span>GATEWAY</a><span class="local">● На вашем компьютере</span></header>
-  <main>
-    <section class="intro">
-      <p class="eyebrow">ЛОКАЛЬНАЯ ПЕСОЧНИЦА</p>
-      <h1>Подмените данные.<br><span>Проверьте результат.</span></h1>
-      <p>Посмотрите, что нашёл движок, как он заменил данные и что получилось после восстановления.</p>
-      <p class="scope">Текст обрабатывается локально. Облачная модель не вызывается; сетевой шлюз и изоляция этим экраном не проверяются.</p>
-    </section>
-    <section class="workspace">
-      <div class="panel input-panel">
-        <div class="panel-title"><span class="step">01</span><h2>Ваш текст</h2><button id="example" class="quiet" type="button">Пример</button></div>
-        <label for="source">Для демо используйте вымышленные данные</label>
-        <textarea id="source" maxlength="100000" spellcheck="false">Клиент: Анна Сергеевна Смирнова.
-Email: anna.demo@example.test
-Телефон: +7 900 111-22-33
-Паспорт: 00 11 123456</textarea>
-        <div class="controls"><label for="mode">Режим</label><select id="mode"><option value="realistic">Вымышленные данные</option><option value="marker">Маркеры</option></select><button id="process" type="button">Заменить данные →</button></div>
-        <p id="error" class="error" role="alert" hidden></p>
+<body class="deck-mode">
+  <!-- Glowing atmospheric backdrop -->
+  <div class="aura-glow aura-top-left"></div>
+  <div class="aura-glow aura-bottom-right"></div>
+  <div class="aura-glow aura-center"></div>
+  <div class="grid-overlay"></div>
+
+  <!-- Deck Layout Container (100vh locked) -->
+  <div class="presentation-wrapper">
+
+    <!-- Top Presentation Header Bar -->
+    <header class="deck-header">
+      <div class="deck-brand">
+        <div class="logo-shield">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <div class="brand-title">PII GATEWAY <span class="tag-zero-trust">ZERO-TRUST AGENT DEFENSE</span></div>
+          <div class="brand-sub">Интерактивная презентация защитного контура автономных ИИ-агентов</div>
+        </div>
       </div>
-      <div class="panel">
-        <div class="panel-title"><span class="step">02</span><h2>После подмены</h2></div>
-        <p id="metrics" class="muted" aria-live="polite">Запустите обработку текста.</p>
-        <pre id="masked" class="output">—</pre>
-        <p class="scope">Проверьте результат перед передачей модели. Отсутствие найденных полей не доказывает отсутствие персональных данных.</p>
+
+      <!-- 5-Step Progress Indicators Bar -->
+      <nav class="step-progress-nav" id="step-nav">
+        <button class="step-nav-btn active" data-step="1">
+          <span class="step-num">01</span>
+          <span class="step-text">Входной промпт</span>
+          <span class="step-line"></span>
+        </button>
+        <button class="step-nav-btn" data-step="2">
+          <span class="step-num">02</span>
+          <span class="step-text">Детекция ПДн</span>
+          <span class="step-line"></span>
+        </button>
+        <button class="step-nav-btn" data-step="3">
+          <span class="step-num">03</span>
+          <span class="step-text">Маскирование &amp; Vault</span>
+          <span class="step-line"></span>
+        </button>
+        <button class="step-nav-btn" data-step="4">
+          <span class="step-num">04</span>
+          <span class="step-text">Пример ответа</span>
+          <span class="step-line"></span>
+        </button>
+        <button class="step-nav-btn" data-step="5">
+          <span class="step-num">05</span>
+          <span class="step-text">Восстановление</span>
+          <span class="step-line"></span>
+        </button>
+      </nav>
+
+      <!-- Right Header Controls -->
+      <div class="deck-header-actions">
+        <!-- Mode Switcher -->
+        <div class="mode-switcher" title="Режим обезличивания">
+          <button class="mode-pill-btn active" id="btn-mode-realistic" data-mode="realistic">
+            <span class="mode-icon">🎭</span>
+            <span>Псевдонимы</span>
+          </button>
+          <button class="mode-pill-btn" id="btn-mode-marker" data-mode="marker">
+            <span class="mode-icon">🏷️</span>
+            <span>Маркеры</span>
+          </button>
+        </div>
+
+        <!-- Dynamic Case Generator Button -->
+        <button class="btn-action glow-amber" id="btn-generate-case" title="Сгенерировать случайное ФИО, телефон, email, паспорт">
+          <span class="btn-icon">🎲</span>
+          <span>Новый пример</span>
+        </button>
+
+        <!-- Fullscreen Button -->
+        <button class="btn-action-icon" id="btn-fullscreen" title="Полноэкранный режим [F]">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        </button>
       </div>
-    </section>
-    <section class="panel detection">
-      <details><summary>Какие данные нашёл движок <span id="count">—</span></summary>
-        <div class="table-wrap"><table><thead><tr><th>Тип</th><th>Фрагмент</th><th>Диапазон символов</th><th>Детектор</th></tr></thead><tbody id="spans"></tbody></table></div>
-      </details>
-    </section>
-    <section class="workspace">
-      <div class="panel">
-        <div class="panel-title"><span class="step">03</span><h2>Обратное восстановление</h2></div>
-        <p id="roundtrip" class="muted" aria-live="polite">После обработки сравним восстановленный текст с исходником.</p>
-        <pre id="restored" class="output">—</pre>
-        <p class="scope">Дословное совпадение проверяет обратимость. Оно не измеряет полноту поиска или сохранение связей между людьми.</p>
+    </header>
+
+    <!-- Main Presentation Stage (Holds 5 Single-Screen Slides) -->
+    <main class="deck-stage" id="deck-stage">
+
+      <!-- ======================================================== -->
+      <!-- SLIDE 1: RAW INPUT TEXT & EDITABLE PROMPT                -->
+      <!-- ======================================================== -->
+      <section class="slide-panel active" id="slide-1" data-slide-index="1">
+        <div class="slide-header">
+          <div class="slide-badge-title">
+            <span class="badge-step">ШАГ 01 ИЗ 05</span>
+            <h2 class="slide-title">Входной промпт и документ клиента</h2>
+          </div>
+          <p class="slide-desc">
+            Реалистичный сценарий использования: автономный ИИ-агент получает задачу и карточку клиента из CRM.
+            <strong>Окно ввода активно</strong> — вы можете отредактировать текст перед отправкой.
+          </p>
+        </div>
+
+        <!-- Error / Failure Banner (Visible on engine or validation rejection) -->
+        <div class="error-banner-wrap" id="error-banner-wrap" style="display: none;">
+          <div class="error-banner">
+            <span class="error-icon">⚠️</span>
+            <span class="error-text" id="error-banner-text">Шлюз отклонил обработку.</span>
+          </div>
+        </div>
+
+        <div class="slide-body slide-body-single">
+          <div class="editor-card">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="traffic-dot dot-red"></span>
+                <span class="traffic-dot dot-yellow"></span>
+                <span class="traffic-dot dot-green"></span>
+                <span class="file-name">agent_task_and_client_card.txt</span>
+                <span class="badge-live-editor">АКТИВНЫЙ РЕДАКТОР</span>
+              </div>
+              <div class="topbar-right">
+                <span class="editor-meta" id="lbl-editor-meta">Символов: 450 | Строк: 12</span>
+                <button class="btn-xs" id="btn-reset-text" title="Вернуть исходный текст">Сбросить</button>
+              </div>
+            </div>
+
+            <div class="editor-content-wrap">
+              <textarea id="source-editor" class="code-textarea" spellcheck="false" placeholder="Введите текст с персональными данными..."></textarea>
+            </div>
+
+            <div class="card-footer-info">
+              <div class="footer-note">
+                <span class="note-icon">ℹ️</span>
+                <span>Текст содержит чувствительные ПДн: <strong>ФИО в разных падежах</strong>, <strong>телефон</strong>, <strong>email</strong>, <strong>паспорт РФ</strong>.</span>
+              </div>
+              <button class="btn-forward-step" id="btn-step1-forward">
+                <span>Перейти к детекции ПДн</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- SLIDE 2: DETECTED PII WITH GLOWING ILLUMINATION         -->
+      <!-- ======================================================== -->
+      <section class="slide-panel" id="slide-2" data-slide-index="2">
+        <div class="slide-header">
+          <div class="slide-badge-title">
+            <span class="badge-step step-cyan">ШАГ 02 ИЗ 05</span>
+            <h2 class="slide-title">Локальный перехват и детекция ПДн</h2>
+          </div>
+          <p class="slide-desc">
+            Шлюз перехватывает обращение в памяти процесса до выхода в сеть. Нейросетевой NER и строгие регулярные правила мгновенно локализуют все персональные данные.
+          </p>
+        </div>
+
+        <!-- Telemetry Strip -->
+        <div class="slide-metrics-strip">
+          <div class="metric-pill pill-cyan">
+            <span class="metric-val" id="s2-count">0</span>
+            <span class="metric-lbl">Сущностей найдено</span>
+          </div>
+          <div class="metric-pill pill-purple">
+            <span class="metric-val" id="s2-types">—</span>
+            <span class="metric-lbl">Категории ПДн</span>
+          </div>
+          <div class="metric-pill pill-emerald">
+            <span class="metric-val" id="s2-latency">0.0 мс</span>
+            <span class="metric-lbl">Скорость детекции</span>
+          </div>
+          <div class="metric-pill pill-blue">
+            <span class="metric-val">LOCAL PASS</span>
+            <span class="metric-lbl">Статус перехвата</span>
+          </div>
+        </div>
+
+        <div class="slide-body slide-body-split">
+          <!-- Left: Illuminated document with glowing tags -->
+          <div class="panel-card flex-2">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="badge-pill bg-cyan">ПОДСВЕТКА СУЩНОСТЕЙ</span>
+                <span class="panel-caption">Подсвеченные сущности в исходном контексте</span>
+              </div>
+            </div>
+            <div class="card-inner-scrollable">
+              <div class="highlighted-display" id="s2-highlighted-text">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Detected Spans Breakdown -->
+          <div class="panel-card flex-1">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="badge-pill bg-purple">РЕЕСТР ПЕРЕХВАТА</span>
+                <span class="panel-caption">Список обнаруженных спанов</span>
+              </div>
+            </div>
+            <div class="card-inner-scrollable">
+              <div class="spans-list" id="s2-spans-list">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- SLIDE 3: MASKED TEXT & ISOLATED VAULT MAPPING TABLE      -->
+      <!-- ======================================================== -->
+      <section class="slide-panel" id="slide-3" data-slide-index="3">
+        <div class="slide-header">
+          <div class="slide-badge-title">
+            <span class="badge-step step-amber">ШАГ 03 ИЗ 05</span>
+            <h2 class="slide-title">Маскирование данных и изолированный Vault</h2>
+          </div>
+          <p class="slide-desc">
+            Оригинальные данные сохраняются в локальном защищенном хранилище Vault (SQLite chmod 0600).
+            Во внешний контекст передаются безопасные реалистичные псевдонимы с сохранением падежей.
+          </p>
+        </div>
+
+        <div class="slide-body slide-body-split-equal">
+          <!-- Left: Outbound payload -->
+          <div class="panel-card">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="badge-pill bg-emerald">📤 ОБЕЗЛИЧЕННЫЙ ТЕКСТ</span>
+                <span class="panel-caption">Контекст для автономного агента</span>
+              </div>
+              <div class="topbar-right">
+                <span class="chip-canary-pass" id="s3-canary-badge">✓ НАЙДЕННЫЕ СУЩНОСТИ ЗАМЕНЕНЫ</span>
+              </div>
+            </div>
+            <div class="card-inner-scrollable">
+              <div class="masked-display" id="s3-masked-text">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+            <div class="card-bottom-callout">
+              <span class="callout-icon">🔒</span>
+              <span>Все обнаруженные персональные данные изолированы в пределах локального хранилища сессии.</span>
+            </div>
+          </div>
+
+          <!-- Right: Vault Mapping Table with Declensions -->
+          <div class="panel-card">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="badge-pill bg-blue">🗄️ ТАБЛИЦА СООТВЕТСТВИЙ VAULT</span>
+                <span class="panel-caption">SQLite chmod 0600 (Локальная сессия)</span>
+              </div>
+              <div class="topbar-right">
+                <span class="vault-secure-tag">1:1 БИЕКЦИЯ</span>
+              </div>
+            </div>
+            <div class="card-inner-scrollable table-wrap">
+              <table class="vault-clean-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Тип</th>
+                    <th>Исходное значение</th>
+                    <th>Безопасный псевдоним</th>
+                    <th>Падежные формы</th>
+                  </tr>
+                </thead>
+                <tbody id="s3-table-body">
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
+            </div>
+            <div class="card-bottom-callout bg-callout-purple">
+              <span class="callout-icon">💡</span>
+              <span>Шлюз сохраняет все падежные формы (Иван ➔ Ивану, Петров ➔ Петрова), чтобы модель строила грамотный русский текст.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- SLIDE 4: AGENT / LLM OUTPUT WITH FAKE IDENTITIES         -->
+      <!-- ======================================================== -->
+      <section class="slide-panel" id="slide-4" data-slide-index="4">
+        <div class="slide-header">
+          <div class="slide-badge-title">
+            <span class="badge-step step-purple">ШАГ 04 ИЗ 05</span>
+            <h2 class="slide-title">Пример ответа агента (с псевдонимами)</h2>
+          </div>
+          <p class="slide-desc">
+            Локальный пример ответа автономного агента по шаблону на основе обезличенных данных (внешняя LLM не вызывалась).
+            Псевдонимы использованы в естественных грамматических падежах.
+          </p>
+        </div>
+
+        <div class="slide-body slide-body-single">
+          <div class="agent-output-card">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="ai-pulse-dot"></span>
+                <span class="ai-model-tag" id="s4-model-name">Локальный пример ответа агента (LLM не вызывалась)</span>
+                <span class="badge-untrusted-cloud">ОБЕЗЛИЧЕННЫЙ КОНТЕКСТ</span>
+              </div>
+              <div class="topbar-right">
+                <span class="tag-status-ok">LOCAL 200 OK</span>
+              </div>
+            </div>
+
+            <div class="card-inner-scrollable">
+              <div class="agent-chat-bubble">
+                <div class="chat-avatar">🤖</div>
+                <div class="chat-message-content">
+                  <div class="chat-sender-line">ИИ-ассистент клиентского сервиса <span class="chat-time">только что</span></div>
+                  <div class="chat-text-highlighted" id="s4-agent-text">
+                    <!-- Injected via JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-footer-info footer-educational">
+              <div class="edu-badge">ПРИМЕЧАНИЕ ДЛЯ ЖЮРИ</div>
+              <div class="edu-text">
+                Обратите внимание: Агент оперирует исключительно синтетическим профилем клиента и склоняет его в нужных падежах.
+                Реальный клиент остаётся <strong>полностью изолированным</strong> в локальном хранилище.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================================================== -->
+      <!-- SLIDE 5: REVERSE RESTORATION (DEMASKING)                 -->
+      <!-- ======================================================== -->
+      <section class="slide-panel" id="slide-5" data-slide-index="5">
+        <div class="slide-header">
+          <div class="slide-badge-title">
+            <span class="badge-step step-green">ШАГ 05 ИЗ 05</span>
+            <h2 class="slide-title">Обратное восстановление исходных данных</h2>
+          </div>
+          <p class="slide-desc">
+            Шлюз перехватывает ответ на выходе, находит все псевдонимы во всех падежах через защищенный Vault и мгновенно возвращает исходные данные клиента.
+          </p>
+        </div>
+
+        <!-- Telemetry Strip -->
+        <div class="slide-metrics-strip">
+          <div class="metric-pill pill-emerald">
+            <span class="metric-val" id="s5-status">STATUS: COMPLETE</span>
+            <span class="metric-lbl">Статус демаскирования</span>
+          </div>
+          <div class="metric-pill pill-cyan">
+            <span class="metric-val" id="s5-fidelity">100.0% (exact)</span>
+            <span class="metric-lbl">Точность восстановления</span>
+          </div>
+          <div class="metric-pill pill-purple">
+            <span class="metric-val" id="s5-latency">0.0 мс</span>
+            <span class="metric-lbl">Время преобразования</span>
+          </div>
+          <div class="metric-pill pill-blue">
+            <span class="metric-val" id="s5-unresolved">0 ОШИБОК</span>
+            <span class="metric-lbl">Неразрешенные маркеры</span>
+          </div>
+        </div>
+
+        <div class="slide-body slide-body-split-equal">
+          <!-- Left: Agent output with fakes (Before) -->
+          <div class="panel-card">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="badge-pill bg-purple">1. ОТВЕТ С ПСЕВДОНИМАМИ</span>
+                <span class="panel-caption">Синтетические реквизиты</span>
+              </div>
+            </div>
+            <div class="card-inner-scrollable">
+              <div class="comparison-box box-fakes" id="s5-fakes-preview">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Restored output to client (After) -->
+          <div class="panel-card panel-glow-green">
+            <div class="card-topbar">
+              <div class="topbar-left">
+                <span class="badge-pill bg-emerald">2. ИТОГОВЫЙ ОТВЕТ КЛИЕНТУ</span>
+                <span class="panel-caption">Оригинальные данные восстановлены</span>
+              </div>
+              <div class="topbar-right">
+                <span class="badge-ready-deliver">ГОТОВО К ОТПРАВКЕ КЛИЕНТУ</span>
+              </div>
+            </div>
+            <div class="card-inner-scrollable">
+              <div class="comparison-box box-restored" id="s5-restored-preview">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Morphing Transformations Ribbon -->
+        <div class="transformations-ribbon" id="s5-transformations-ribbon">
+          <!-- Injected via JS: pill cards showing fake -> original -->
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Presenter Navigation Bar -->
+    <footer class="deck-footer">
+      <div class="footer-left">
+        <button class="btn-deck-nav btn-prev" id="btn-prev-slide" title="Предыдущий шаг [Стрелка влево]">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span>Назад</span>
+          <kbd class="key-hint">←</kbd>
+        </button>
       </div>
-      <div class="panel">
-        <div class="panel-title"><span class="step">04</span><h2>Попробуйте свой ответ</h2></div>
-        <label for="answer">Измените обезличенный текст — например, составьте из него письмо</label>
-        <textarea id="answer" maxlength="100000" spellcheck="false" disabled placeholder="После обработки здесь появится текст с заменами."></textarea>
-        <button id="restore" type="button" disabled>Вернуть исходные данные</button>
-        <p id="answer-status" class="muted" aria-live="polite"></p><pre id="answer-result" class="output">—</pre>
+
+      <!-- Center Slide Indicators -->
+      <div class="footer-center">
+        <div class="slide-dots" id="slide-dots">
+          <button class="slide-dot active" data-step="1" title="Шаг 1: Исходный текст"></button>
+          <button class="slide-dot" data-step="2" title="Шаг 2: Детекция ПДн"></button>
+          <button class="slide-dot" data-step="3" title="Шаг 3: Маскирование & Vault"></button>
+          <button class="slide-dot" data-step="4" title="Шаг 4: Пример ответа"></button>
+          <button class="slide-dot" data-step="5" title="Шаг 5: Восстановление"></button>
+        </div>
+        <div class="step-indicator-text" id="lbl-step-counter">Шаг 1 из 5</div>
       </div>
-    </section>
-    <footer>Соответствия хранятся во временном локальном vault до остановки сервера. Этот экран не отправляет текст облачному провайдеру.</footer>
-  </main>
+
+      <div class="footer-right">
+        <!-- Autoplay button -->
+        <button class="btn-deck-secondary" id="btn-autoplay" title="Автоматический показ слайдов">
+          <span class="auto-icon">▶</span>
+          <span id="lbl-autoplay">Авто-показ</span>
+        </button>
+
+        <!-- Forward button -->
+        <button class="btn-deck-nav btn-next glow-cyan" id="btn-next-slide" title="Следующий шаг [Пробел / Стрелка вправо]">
+          <span id="lbl-next-btn">Следующий шаг</span>
+          <kbd class="key-hint">Пробел / →</kbd>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </footer>
+
+  </div>
+
+  <script src="static/app.js"></script>
 </body>
 </html>
